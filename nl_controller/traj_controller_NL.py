@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+
+# 控制姿态+姿态节点，SR中NL控制器
 import rclpy
 import numpy as np
 from numpy.linalg import norm
@@ -9,6 +11,10 @@ from scipy.spatial.transform import Rotation as R
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from .traj import TargetTraj
 from rclpy.clock import Clock
+import csv
+import os
+from pathlib import Path
+from datetime import datetime
 
 
 class TrajController(Node):
@@ -19,7 +25,7 @@ class TrajController(Node):
 
         # 控制频率
         self.control_rate = 50.0
-        self.traj = TargetTraj(FLAG=3)
+        self.traj = TargetTraj(FLAG=1)
 
         # 初始化时钟
         self.clock = Clock()
@@ -54,6 +60,85 @@ class TrajController(Node):
         # 系统常量
         self.gravity = 9.8
         self.thrust_efficiency = 0.74
+
+        # 初始化日志记录
+        self.setup_flight_log()
+
+    def setup_flight_log(self):
+        """初始化飞行日志记录"""
+        # 使用环境变量或当前工作目录来定位源代码目录
+        # 获取ROS工作空间的src目录
+        if 'ROS_WORKSPACE' in os.environ:
+            workspace = Path(os.environ['ROS_WORKSPACE'])
+            package_dir = workspace / 'src' / 'nl_controller'
+        else:
+            # 尝试从当前工作目录推断（假设在 px4_ws 目录下）
+            cwd = Path.cwd()
+            if 'px4_ws' in str(cwd):
+                # 找到 px4_ws 路径
+                parts = cwd.parts
+                px4_ws_index = parts.index('px4_ws')
+                workspace = Path(*parts[:px4_ws_index+1])
+                package_dir = workspace / 'src' / 'nl_controller'
+            else:
+                # 默认使用当前工作目录
+                package_dir = Path.cwd()
+
+        # 创建log目录（相对路径）
+        log_dir = package_dir / 'log'
+        log_dir.mkdir(exist_ok=True)
+
+        # 生成带时间戳的文件名（精确到分钟）
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H%M')
+        log_filename = f'{timestamp}.csv'
+        self.log_file_path = log_dir / log_filename
+
+        # 创建CSV文件并写入表头
+        self.log_file = open(self.log_file_path, 'w', newline='')
+        self.csv_writer = csv.writer(self.log_file)
+
+        # 写入表头
+        header = [
+            'timestamp',
+            'x', 'y', 'z',
+            'vx', 'vy', 'vz',
+            'roll', 'pitch', 'yaw',
+            'x_des', 'y_des', 'z_des'
+        ]
+        self.csv_writer.writerow(header)
+        self.log_file.flush()  # 立即写入磁盘
+
+        self.get_logger().info(f"Flight log initialized: {self.log_file_path}")
+
+    def log_flight_data(self, pose, velo, rotation_matrix, traj_p):
+        """记录飞行数据到CSV文件"""
+        # 从旋转矩阵提取欧拉角（roll, pitch, yaw）
+        r = R.from_matrix(rotation_matrix)
+        euler_angles = r.as_euler('xyz', degrees=True)  # 返回角度
+        roll, pitch, yaw = euler_angles
+
+        # 获取当前时间戳（秒）
+        current_time = self.get_clock().now().nanoseconds * 1e-9
+
+        # 准备数据行
+        data_row = [
+            current_time,
+            pose[0, 0], pose[1, 0], pose[2, 0],  # x, y, z
+            velo[0, 0], velo[1, 0], velo[2, 0],  # vx, vy, vz
+            roll, pitch, yaw,  # roll, pitch, yaw
+            traj_p[0, 0], traj_p[1, 0], traj_p[2, 0]  # x_des, y_des, z_des
+        ]
+
+        # 写入CSV
+        self.csv_writer.writerow(data_row)
+        self.log_file.flush()  # 确保数据立即写入磁盘
+
+    def destroy_node(self):
+        """节点销毁时关闭日志文件"""
+        if hasattr(self, 'log_file') and self.log_file:
+            self.log_file.close()
+            self.get_logger().info(f"Flight log saved to: {self.log_file_path}")
+        super().destroy_node()
 
     def pa_cb(self, msg):
         self.current_pa = msg
@@ -113,6 +198,7 @@ class TrajController(Node):
 
         # 前馈参考加速度
         a_r = traj_a - sliding_gain * (velo - traj_v) + np.array([[0], [0], [self.gravity]])
+        
 
         # 计算期望力（包含重力补偿、跟踪控制和自适应补偿）
         F_sp = a_r - tracking_gain * s
@@ -160,7 +246,7 @@ class TrajController(Node):
         attitude_target.orientation.w = quaternion_sp[3]
 
         # 设置控制掩码（仅控制姿态和推力）
-        attitude_target.type_mask = int(7)  # 忽略角速度控制
+        attitude_target.type_mask = int(7)
 
         return attitude_target
 
@@ -192,13 +278,22 @@ class TrajController(Node):
         # 计算期望力
         F_sp = self.calculate_desired_force(
             pose, velo, traj_p, traj_v, traj_a, sliding_gain, tracking_gain)
-        # print('F_sp=', F_sp)
+        # print('F_sp=', F_sp.T)
 
         # 计算期望姿态和推力
         attitude_target = self.calculate_attitude_from_force(F_sp, body_z, traj_yaw)
 
         # 发布控制指令
         self.controller_pub_.publish(attitude_target)
+
+        # 记录飞行数据到CSV
+        self.log_flight_data(pose, velo, rotation_matrix, traj_p)
+
+        # 在获取当前状态后立即打印
+        pose, velo, rotation_matrix, body_z = self.get_current_state()
+        # print(f'当前高度 z={pose[2,0]:.3f}, 速度vz={velo[2,0]:.3f}')
+        # print(f'目标高度 z_des={traj_p[2,0]:.3f}')
+        # print(f'高度误差 = {pose[2,0] - traj_p[2,0]:.3f}')
 
         # 记录调试信息
         if self.get_logger().get_effective_level() <= rclpy.logging.LoggingSeverity.DEBUG:
@@ -208,6 +303,7 @@ class TrajController(Node):
 
 
 def main(args=None):
+    node = None
     try:
         rclpy.init(args=args)
         node = TrajController("traj_controller_NL")
@@ -215,6 +311,8 @@ def main(args=None):
     except Exception as e:
         print(f"Error in main: {e}")
     finally:
+        if node is not None:
+            node.destroy_node()
         rclpy.shutdown()
 
 

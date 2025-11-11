@@ -20,11 +20,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'attitude_controller = nl_controller.attitude_controller:main',
+            'attitude_controller = nl_controller.attitude_control:main',
             'traj_controller_NL = nl_controller.traj_controller_NL:main',
             'traj_controller_NF = nl_controller.traj_controller_NF:main',
-            'phi_estimate = nl_controller.phi_estimate:main',
-            'test_node = nl_controller.test_node:main',
+            'phi_estimate = nl_controller.Phi_estimate:main',
             'demo = nl_controller.demo:main',
             'traj_controller_NL2 = nl_controller.traj_controller_NL2:main',
             'traj_controller_NF2 = nl_controller.traj_controller_NF2:main',
@@ -33,6 +32,7 @@ setup(
             'traj_controller_position = nl_controller.traj_controller_position:main',
             'test_node = nl_controller.test_node:main',
             'traj_controller_MPC = nl_controller.traj_controller_MPC:main',
+            'backstepping_controller = nl_controller.backstepping_controller:main',
         ],
     },
 )

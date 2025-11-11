@@ -12,6 +12,8 @@ from rclpy.clock import Clock
 import csv
 import os
 from datetime import datetime
+from pathlib import Path
+
 
 
 class TrajController(Node):
@@ -22,14 +24,14 @@ class TrajController(Node):
 
         # 控制频率
         self.control_rate = 50.0
-        self.traj = TargetTraj(FLAG=3)
+        self.traj = TargetTraj(FLAG=1)
 
         # 使用当前时间创建唯一的文件名
         current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_filename = f"trajectory_log_{current_time}.csv"
 
         # 确保日志目录存在
-        log_dir = "/home/swarm/wz/Log"
+        log_dir = "/home/zhe/Log"
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
