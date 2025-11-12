@@ -215,7 +215,7 @@ class BacksteppingController(Node):
 
     def saturate_thrust(self, thrust):
         """推力饱和限制"""
-        return np.clip(thrust, 0.02, 0.12)  # 根据您原代码的限制
+        return np.clip(thrust, 0.0, 1.0)  # 根据您原代码的限制
 
     def calculate_lqr_thrust_yaw(self, pose, velo, traj_p, traj_v, euler_angles):
         """计算LQR推力和偏航控制（简化版）"""
@@ -228,8 +228,8 @@ class BacksteppingController(Node):
         vz_error = vel_error[2, 0]
         
         # 推力控制律
-        balance_thrust = 0.065  # 平衡推力
-        thrust_command = balance_thrust + 0.5 * z_error + 0.2 * vz_error
+        balance_thrust = 0.73  # 平衡推力
+        thrust_command = balance_thrust + 0.02 * z_error + 0.02 * vz_error
         thrust_command = self.saturate_thrust(thrust_command)
         
         # 偏航控制（简化）

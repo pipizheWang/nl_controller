@@ -24,6 +24,9 @@ class ThrustCalibration(Node):
         self.control_rate = 50.0
         self.clock = Clock()
 
+        # 物理常数
+        self.gravity = 9.81  # 重力加速度 m/s²
+
         # 状态变量
         self.current_velo = None
         self.prev_velo = None
@@ -59,6 +62,7 @@ class ThrustCalibration(Node):
         self.setup_calibration_log()
 
         self.get_logger().info("Thrust calibration node initialized")
+        self.get_logger().info(f"Gravity compensation: g = {self.gravity} m/s²")
         self.get_logger().info(f"Testing {len(self.thrust_levels)} thrust levels: {self.thrust_levels}")
 
     def setup_calibration_log(self):
@@ -74,7 +78,7 @@ class ThrustCalibration(Node):
         self.csv_writer = csv.writer(self.log_file)
 
         # 写入表头
-        header = ['timestamp', 'thrust', 'vz', 'az']
+        header = ['timestamp', 'thrust', 'vz', 'az_measured', 'az_thrust_compensated']
         self.csv_writer.writerow(header)
         self.log_file.flush()
 
@@ -156,19 +160,25 @@ class ThrustCalibration(Node):
         # 记录原始数据
         current_time = self.get_clock().now().nanoseconds * 1e-9
         vz = self.current_velo.twist.linear.z
-        self.csv_writer.writerow([current_time, current_thrust, vz, az])
+        az_thrust_compensated = az + self.gravity  # 补偿重力
+        self.csv_writer.writerow([current_time, current_thrust, vz, az, az_thrust_compensated])
         self.log_file.flush()
 
         # 检查是否达到稳态持续时间
         if elapsed_time >= self.steady_state_duration:
             # 计算该推力下的平均加速度
             if len(self.accel_buffer) > 0:
-                avg_acceleration = np.mean(list(self.accel_buffer))
+                avg_acceleration_measured = np.mean(list(self.accel_buffer))
                 std_acceleration = np.std(list(self.accel_buffer))
                 
-                self.calibration_data.append((current_thrust, avg_acceleration))
+                # 补偿重力：测量的是 az_measured = az_thrust - g
+                # 所以油门产生的加速度是 az_thrust = az_measured + g
+                avg_acceleration_thrust = avg_acceleration_measured + self.gravity
+                
+                self.calibration_data.append((current_thrust, avg_acceleration_thrust))
                 self.get_logger().info(
-                    f"Thrust: {current_thrust:.3f}, Avg Az: {avg_acceleration:.3f} ± {std_acceleration:.3f} m/s²")
+                    f"Thrust: {current_thrust:.3f}, Az_measured: {avg_acceleration_measured:.3f} ± {std_acceleration:.3f} m/s², "
+                    f"Az_thrust: {avg_acceleration_thrust:.3f} m/s² (with gravity compensation)")
 
             # 进入下一个推力级别
             self.current_thrust_idx += 1
@@ -243,9 +253,9 @@ class ThrustCalibration(Node):
         quad_fit = a * az_range**2 + b_q * az_range + c
         plt.plot(az_range, quad_fit, 'g--', label=f'Quadratic: T = {a:.4f}*az² + {b_q:.4f}*az + {c:.4f}', linewidth=2)
 
-        plt.xlabel('Acceleration (m/s²)', fontsize=12)
+        plt.xlabel('Thrust-generated Acceleration (m/s²)', fontsize=12)
         plt.ylabel('Normalized Thrust', fontsize=12)
-        plt.title('Acceleration to Thrust Mapping', fontsize=14)
+        plt.title('Acceleration to Thrust Mapping (Gravity Compensated)', fontsize=14)
         plt.legend(fontsize=9)
         plt.grid(True, alpha=0.3)
 

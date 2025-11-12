@@ -32,4 +32,4 @@ colcon build --packages-select nl_controller
 export http_proxy=http://127.0.0.1:7890
 export https_proxy=http://127.0.0.1:7890
 
-thrust = -0.0012 * a² + 0.0466 * a + 0.7286
+thrust = -0.0015 * thrust² + 0.0764 * thrust + 0.1237
