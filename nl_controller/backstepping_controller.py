@@ -12,6 +12,10 @@ from .traj import TargetTraj
 from rclpy.clock import Clock
 import threading
 import time
+import csv
+import os
+from pathlib import Path
+from datetime import datetime
 
 
 class BacksteppingController(Node):
@@ -67,7 +71,7 @@ class BacksteppingController(Node):
             TwistStamped, '/mavros/local_position/velocity_local', self.velo_cb, qos_best_effort)
 
         self.controller_pub_ = self.create_publisher(
-            AttitudeTarget, '/mavros/setpoint_raw/attitude', qos_reliable)
+            AttitudeTarget, '/control/attitude', qos_reliable)
 
         self.controller_timer_ = self.create_timer(1 / self.control_rate, self.controller_cb)
 
@@ -82,6 +86,9 @@ class BacksteppingController(Node):
         self.adaptive_thread = threading.Thread(target=self.adaptive_control_update)
         self.adaptive_thread.daemon = True
         self.adaptive_thread.start()
+
+        # 初始化日志记录（与 traj_controller_NL 保持一致）
+        self.setup_flight_log()
 
     def pa_cb(self, msg):
         self.current_pa = msg
@@ -153,6 +160,85 @@ class BacksteppingController(Node):
         theta_c = self.rho_x_hat * self.alpha_3
 
         return theta_c
+
+    def setup_flight_log(self):
+        """初始化飞行日志记录"""
+        # 使用环境变量或当前工作目录来定位源代码目录
+        # 获取ROS工作空间的src目录
+        if 'ROS_WORKSPACE' in os.environ:
+            workspace = Path(os.environ['ROS_WORKSPACE'])
+            package_dir = workspace / 'src' / 'nl_controller'
+        else:
+            # 尝试从当前工作目录推断（假设在 px4_ws 目录下）
+            cwd = Path.cwd()
+            if 'px4_ws' in str(cwd):
+                # 找到 px4_ws 路径
+                parts = cwd.parts
+                px4_ws_index = parts.index('px4_ws')
+                workspace = Path(*parts[:px4_ws_index+1])
+                package_dir = workspace / 'src' / 'nl_controller'
+            else:
+                # 默认使用当前工作目录
+                package_dir = Path.cwd()
+
+        # 创建log目录（相对路径）
+        log_dir = package_dir / 'log'
+        log_dir.mkdir(exist_ok=True)
+
+        # 生成带时间戳的文件名（精确到分钟）
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H%M')
+        log_filename = f'{timestamp}.csv'
+        self.log_file_path = log_dir / log_filename
+
+        # 创建CSV文件并写入表头
+        self.log_file = open(self.log_file_path, 'w', newline='')
+        self.csv_writer = csv.writer(self.log_file)
+
+        # 写入表头（与 traj_controller_NL 保持一致）
+        header = [
+            'timestamp',
+            'x', 'y', 'z',
+            'vx', 'vy', 'vz',
+            'roll', 'pitch', 'yaw',
+            'x_des', 'y_des', 'z_des'
+        ]
+        self.csv_writer.writerow(header)
+        self.log_file.flush()  # 立即写入磁盘
+
+        self.get_logger().info(f"Flight log initialized: {self.log_file_path}")
+
+    def log_flight_data(self, pose, velo, rotation_matrix, traj_p):
+        """记录飞行数据到CSV文件"""
+        # 从旋转矩阵提取欧拉角（roll, pitch, yaw）
+        r = R.from_matrix(rotation_matrix)
+        euler_angles = r.as_euler('xyz', degrees=True)  # 返回角度
+        roll, pitch, yaw = euler_angles
+
+        # 获取当前时间戳（秒）
+        current_time = self.get_clock().now().nanoseconds * 1e-9
+
+        # 准备数据行
+        data_row = [
+            current_time,
+            pose[0, 0], pose[1, 0], pose[2, 0],  # x, y, z
+            velo[0, 0], velo[1, 0], velo[2, 0],  # vx, vy, vz
+            roll, pitch, yaw,  # roll, pitch, yaw
+            traj_p[0, 0], traj_p[1, 0], traj_p[2, 0]  # x_des, y_des, z_des
+        ]
+
+        # 写入CSV
+        self.csv_writer.writerow(data_row)
+        self.log_file.flush()  # 确保数据立即写入磁盘
+
+    def destroy_node(self):
+        """节点销毁时关闭日志文件"""
+        if hasattr(self, 'log_file') and self.log_file:
+            try:
+                self.log_file.close()
+                self.get_logger().info(f"Flight log saved to: {self.log_file_path}")
+            except Exception:
+                pass
+        super().destroy_node()
 
     def y_backstepping(self, y_1d, y_1d_dot, y_1d_ddot, y_1d_dddot, y_1, y_2, phi):
         """Y方向的Backstepping控制计算滚转角命令"""
@@ -228,8 +314,8 @@ class BacksteppingController(Node):
         vz_error = vel_error[2, 0]
         
         # 推力控制律
-        balance_thrust = 0.73  # 平衡推力
-        thrust_command = balance_thrust + 0.02 * z_error + 0.02 * vz_error
+        balance_thrust = 0.728  # 平衡推力
+        thrust_command = balance_thrust - 0.01 * z_error - 0.03 * vz_error
         thrust_command = self.saturate_thrust(thrust_command)
         
         # 偏航控制（简化）
@@ -286,7 +372,8 @@ class BacksteppingController(Node):
         attitude_target.orientation.w = quaternion_sp[3]
         
         # 推力转换（从牛顿到归一化值）
-        normalized_thrust = np.sqrt(thrust_cmd / self.gravity * self.thrust_efficiency)
+        normalized_thrust = thrust_cmd
+        # print('油门=', thrust_cmd)
         attitude_target.thrust = np.clip(normalized_thrust, 0.0, 1.0)
         
         # 设置控制掩码
@@ -331,6 +418,13 @@ class BacksteppingController(Node):
         # 发布控制指令
         self.controller_pub_.publish(attitude_target)
 
+        # 记录飞行数据到CSV（与 traj_controller_NL 保持一致）
+        try:
+            self.log_flight_data(pose, velo, rotation_matrix, traj_p)
+        except Exception:
+            # 不让日志记录影响控制循环
+            pass
+
         # 调试信息
         if self.get_logger().get_effective_level() <= rclpy.logging.LoggingSeverity.DEBUG:
             self.get_logger().debug(f"Thrust: {thrust_cmd:.3f}, Roll: {roll_cmd:.1f}°, Pitch: {pitch_cmd:.1f}°")
@@ -338,6 +432,7 @@ class BacksteppingController(Node):
 
 
 def main(args=None):
+    node = None
     try:
         rclpy.init(args=args)
         node = BacksteppingController("backstepping_controller")
@@ -345,6 +440,8 @@ def main(args=None):
     except Exception as e:
         print(f"Error in main: {e}")
     finally:
+        if node is not None:
+            node.destroy_node()
         rclpy.shutdown()
 
 
