@@ -33,6 +33,7 @@ setup(
             'test_node = nl_controller.test_node:main',
             'traj_controller_MPC = nl_controller.traj_controller_MPC:main',
             'backstepping_controller = nl_controller.backstepping_controller:main',
+            'thrust_nh = nl_controller.thrust_nh:main',
         ],
     },
 )
