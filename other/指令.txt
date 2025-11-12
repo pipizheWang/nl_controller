@@ -18,11 +18,13 @@ ros2 run nl_controller traj_controller_position
 ros2 run nl_controller traj_controller_NL
 ros2 run nl_controller traj_controller_NL2
 ros2 run nl_controller calibrate_thrust
+ros2 run nl_controller backstepping_controller
 
 ros2 param set /traj_controller_position traj_mode true
 ros2 param set /traj_controller_NL traj_mode true
 ros2 param set /traj_controller_NL_debug traj_mode true
 ros2 param set /traj_controller_NL2 traj_mode true
+ros2 param set /backstepping_controller traj_mode true
 
 ros2 service call /mavros/cmd/arming mavros_msgs/srv/CommandBool "{value: true}"
 
@@ -33,3 +35,6 @@ export http_proxy=http://127.0.0.1:7890
 export https_proxy=http://127.0.0.1:7890
 
 thrust = -0.0015 * thrust² + 0.0764 * thrust + 0.1237
+
+卡号：sertmm2@stu.xidian.edu.cn
+密码：4G399y5DKPAg
