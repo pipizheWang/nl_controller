@@ -122,8 +122,8 @@ class FlightLogPlotter:
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
         
         for i, (ax, label, att_key, color) in enumerate(zip(axes, axes_labels, attitude_keys, colors)):
-            # 将弧度转换为度
-            angle_deg = np.rad2deg(self.data[att_key])
+            # 数据已经是度数，无需转换
+            angle_deg = self.data[att_key]
             ax.plot(self.data['time'], angle_deg, color=color, linewidth=2)
             ax.axhline(y=0, color='k', linestyle='--', linewidth=1, alpha=0.5)
             ax.set_xlabel('Time (s)', fontsize=11)

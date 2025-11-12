@@ -267,7 +267,11 @@ class TrajectoryAnimator:
         
         # 获取转换后的机臂端点
         position = np.array([x, y, z])
-        arm_endpoints = self.quadrotor.transform(position, roll, pitch, yaw)
+        # CSV中的姿态角是度数，需要转换为弧度传递给transform函数
+        roll_rad = np.deg2rad(roll)
+        pitch_rad = np.deg2rad(pitch)
+        yaw_rad = np.deg2rad(yaw)
+        arm_endpoints = self.quadrotor.transform(position, roll_rad, pitch_rad, yaw_rad)
         
         # 更新机臂
         for i, line in enumerate(self.arm_lines):
@@ -292,7 +296,7 @@ class TrajectoryAnimator:
             circle_z = np.zeros_like(theta)
             
             # 将圆圈转换到世界坐标系
-            R = self.quadrotor.rotation_matrix(roll, pitch, yaw)
+            R = self.quadrotor.rotation_matrix(roll_rad, pitch_rad, yaw_rad)
             circle_points = np.vstack([circle_x, circle_y, circle_z])
             world_circle = (R @ circle_points).T + center
             
@@ -302,7 +306,8 @@ class TrajectoryAnimator:
         # 更新信息文本
         time_str = f"Time: {self.data['time'][idx]:.2f}s / {self.data['time'][-1]:.2f}s"
         pos_str = f"Position: ({x:.2f}, {y:.2f}, {z:.2f}) m"
-        att_str = f"Attitude: R={np.rad2deg(roll):.1f}° P={np.rad2deg(pitch):.1f}° Y={np.rad2deg(yaw):.1f}°"
+        # CSV中的姿态角已经是度数，无需转换
+        att_str = f"Attitude: R={roll:.1f}° P={pitch:.1f}° Y={yaw:.1f}°"
         
         # 计算误差
         error_x = x - self.data['x_des'][idx]
