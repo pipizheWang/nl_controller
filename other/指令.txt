@@ -37,7 +37,8 @@ colcon build --packages-select nl_controller
 export http_proxy=http://127.0.0.1:7890
 export https_proxy=http://127.0.0.1:7890
 
-thrust = -0.0015 * a² + 0.0764 * a + 0.1237
+从加速度——油门的映射：thrust = -0.0015 * a² + 0.0764 * a + 0.1237
+悬停：PWM=770
 
 卡号：sertmm2@stu.xidian.edu.cn
 密码：4G399y5DKPAg

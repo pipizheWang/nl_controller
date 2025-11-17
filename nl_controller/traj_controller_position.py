@@ -194,13 +194,46 @@ class TrajController(Node):
             # 发布位置指令
             self.position_setpoint_pub_.publish(position_target)
         else:
-            # 不在轨迹模式下，只记录当前状态
+            # 不在轨迹模式下，在 (0, 0, 5) 位置保持悬停
+            hover_position = PositionTarget()
+            hover_position.header.stamp = self.get_clock().now().to_msg()
+            hover_position.header.frame_id = "map"
+            hover_position.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
+            
+            # 设置类型掩码：启用位置和偏航角控制
+            hover_position.type_mask = (
+                    PositionTarget.IGNORE_VX |
+                    PositionTarget.IGNORE_VY |
+                    PositionTarget.IGNORE_VZ |
+                    PositionTarget.IGNORE_AFX |
+                    PositionTarget.IGNORE_AFY |
+                    PositionTarget.IGNORE_AFZ |
+                    PositionTarget.IGNORE_YAW_RATE |
+                    PositionTarget.FORCE
+            )
+            
+            # 设置悬停目标位置为 (0, 0, 5)
+            hover_position.position.x = 0.0
+            hover_position.position.y = 0.0
+            hover_position.position.z = 5.0
+            
+            # 设置偏航角为0
+            hover_position.yaw = 0.0
+            
+            # 发布悬停位置指令
+            self.position_setpoint_pub_.publish(hover_position)
+            
+            # 计算与悬停点的位置误差
+            hover_target = np.array([[0.0], [0.0], [5.0]])
+            position_error = norm(current_pose - hover_target)
+            
+            # 记录当前状态
             self.csv_writer.writerow([
                 timestamp,
                 current_pose[0, 0], current_pose[1, 0], current_pose[2, 0],
                 current_velo[0, 0], current_velo[1, 0], current_velo[2, 0],
-                0.0, 0.0, 0.0,  # 目标位置为零
-                0.0, -1.0, 0.0  # 误差、轨迹时间和偏航角为零
+                0.0, 0.0, 5.0,  # 目标位置 (0, 0, 5)
+                position_error, -1.0, 0.0  # 位置误差、轨迹时间和偏航角
             ])
 
         # 确保数据实时写入文件
