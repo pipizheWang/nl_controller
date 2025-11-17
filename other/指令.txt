@@ -7,6 +7,7 @@ conda activate torch
 ros2 run mavros mavros_node --ros-args -p fcu_url:=udp://:14540@127.0.0.1:14557 --params-file ~/mavros_config.yaml
 
 终端3：
+conda deactivate
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 
@@ -14,7 +15,7 @@ ros2 service call /mavros/set_mode mavros_msgs/srv/SetMode "{custom_mode: 'OFFBO
 
 ros2 run nl_controller attitude_controller
 
-ros2 run nl_controller Phi_estimate
+ros2 run nl_controller phi_estimate
 
 ros2 run nl_controller traj_controller_position
 ros2 run nl_controller backstepping_controller

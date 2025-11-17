@@ -26,10 +26,10 @@ class PhiEstimate(Node):
         self.hover_pwm_ratio = self.nf_hover_pwm / self.hover_pwm
 
         # 加载神经网络模型
-        model_folder = '/home/swarm/wz/neural-fly-main/models'
-        model_name = 'neural-fly_dim-a-5_v-q-pwm'
-        epoch = 950
-        self.neural_network = load_model(modelname=f"{model_name}-epoch-{epoch}", modelfolder=model_folder)
+        import os
+        model_folder = os.path.dirname(__file__)
+        model_name = 'neural-fly_dim-a-4_v-q-pwm-epoch-950'
+        self.neural_network = load_model(modelname=model_name, modelfolder=model_folder)
 
         # 创建订阅者
         qos_profile = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
@@ -69,12 +69,12 @@ class PhiEstimate(Node):
             inputs = np.concatenate([velo, quaternion, PWM])
             inputs = torch.tensor(inputs, dtype=torch.float)
             Phi_output_ori = self.neural_network.phi(inputs).detach().numpy()
-            Phi_output_true = Phi_output_ori[:4]
 
+            # Phi_output_true = Phi_output_ori[:4]
             Phi = np.zeros((3, 12))
-            Phi[0, 0:4] = Phi_output_true
-            Phi[1, 4:8] = Phi_output_true
-            Phi[2, 8:12] = Phi_output_true
+            Phi[0, 0:4] = Phi_output_ori
+            Phi[1, 4:8] = Phi_output_ori
+            Phi[2, 8:12] = Phi_output_ori
 
             # print(Phi)
 
@@ -84,9 +84,7 @@ class PhiEstimate(Node):
             Phi_msg.row3 = Phi[2, :].tolist()
 
             self.phi_pub_.publish(Phi_msg)
-            if self.get_logger().get_effective_level() <= rclpy.logging.LoggingSeverity.DEBUG:
-                self.get_logger().debug(f"Published Phi matrix with values: {Phi_output_true}")
-            # self.get_logger().info("PhiEst Published Successfully")
+            self.get_logger().info("PhiEst Published Successfully")
         except Exception as e:
             self.get_logger().error(f"Error in phi_cb: {e}")
 
