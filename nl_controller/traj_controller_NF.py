@@ -222,7 +222,8 @@ class TrajController(Node):
         attitude_target = AttitudeTarget()
 
         # 计算归一化推力值（考虑效率）
-        normalized_thrust = np.sqrt(thrust / self.gravity * self.thrust_efficiency * self.thrust_efficiency)
+        # normalized_thrust = np.sqrt(thrust / self.gravity * self.thrust_efficiency * self.thrust_efficiency)
+        normalized_thrust = -0.0015 * thrust * thrust + 0.0764 * thrust + 0.1237
         attitude_target.thrust = np.clip(normalized_thrust, 0.0, 1.0)
 
         actual_thrust_vector = body_z * thrust
