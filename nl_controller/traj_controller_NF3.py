@@ -7,7 +7,6 @@ from mavros_msgs.msg import AttitudeTarget
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from scipy.spatial.transform import Rotation as R
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Imu
 from interfaces.msg import PhiEst
 from .traj import TargetTraj
 from rclpy.clock import Clock
@@ -38,7 +37,6 @@ class TrajController(Node):
         # 初始化状态变量
         self.current_pa = None
         self.current_velo = None
-        self.current_imu = None
         self.current_phi = np.zeros((3, 12))
 
         # 轨迹计时器
@@ -57,8 +55,6 @@ class TrajController(Node):
             PoseStamped, '/mavros/local_position/pose', self.pa_cb, qos_best_effort)
         self.velo_sub_ = self.create_subscription(
             TwistStamped, '/mavros/local_position/velocity_local', self.velo_cb, qos_best_effort)
-        self.imu_sub_ = self.create_subscription(
-            Imu, '/mavros/imu/data', self.imu_cb, qos_best_effort)
         self.phi_sub_ = self.create_subscription(
             PhiEst, '/control/phiest', self.phi_cb, qos_best_effort)
 
@@ -129,9 +125,6 @@ class TrajController(Node):
     def velo_cb(self, msg):
         self.current_velo = msg
 
-    def imu_cb(self, msg):
-        self.current_imu = msg
-
     def phi_cb(self, msg):
         phi_array = np.vstack([np.array(msg.row1), np.array(msg.row2), np.array(msg.row3)])
         self.current_phi = phi_array
@@ -185,15 +178,7 @@ class TrajController(Node):
         # body系z轴方向在world坐标系中的表示
         body_z = np.dot(rotation_matrix, np.array([[0], [0], [1]]))
 
-        # 获取机体加速度并转换到世界坐标系
-        accel_body = np.array([
-            [self.current_imu.linear_acceleration.x],
-            [self.current_imu.linear_acceleration.y],
-            [self.current_imu.linear_acceleration.z - self.gravity]
-        ])
-        accel_world = rotation_matrix.dot(accel_body)
-
-        return pose, velo, rotation_matrix, body_z, accel_world
+        return pose, velo, rotation_matrix, body_z
 
     def calculate_desired_force(self, pose, velo, traj_p, traj_v, traj_a, sliding_gain, tracking_gain):
         """计算期望力"""
@@ -205,8 +190,6 @@ class TrajController(Node):
 
         # 计算自适应补偿力
         adaptive_force = self.current_phi @ self.current_hat.a  # (3*12) * (12*1) = 3*1
-        # print('phi:',self.current_phi)
-        # print('a:',self.current_hat.a)
 
         # NL控制部分
         nl_control = a_r - tracking_gain * s
@@ -281,41 +264,23 @@ class TrajController(Node):
 
         return attitude_target, actual_thrust_vector
 
-    def update_adaptive_parameters(self, s, actual_thrust_vector, accel_world, delta_tk=None):
-        """更新自适应参数估计"""
+    def update_adaptive_parameters(self, s, delta_tk=None):
+        """更新自适应参数估计
+        
+        使用σ-修正自适应律: ȧ = -λa + γΦᵀs
+        离散化: a_{k+1} = (1 - λΔt)a_k + γΔt·Φᵀs
+        """
         if delta_tk is None:
             delta_tk = 1 / self.control_rate
 
         # 自适应参数
         lambda_factor = 0.01  # 遗忘因子
-        Q = 0.1 * np.eye(12)  # 过程噪声协方差
-        R1 = 0.1 * np.eye(3)  # 测量噪声协方差
+        gamma = 0.5  # 自适应增益
 
-        # 计算实际扰动（测量值与模型预测的差异）
-        disturbance = self.mass * (accel_world - np.array([[0], [0], [-self.gravity]]) - actual_thrust_vector)
-
-        # Kalman滤波预测步骤
-        a_minus = (1 - lambda_factor * delta_tk) * self.current_hat.a
-        P_minus = (1 - lambda_factor * delta_tk) ** 2 * self.current_hat.P + Q * delta_tk
-
-        # Kalman增益计算
-        phi_p = self.current_phi @ P_minus @ self.current_phi.T + R1 * delta_tk
-        try:
-            K = P_minus @ self.current_phi.T @ np.linalg.inv(phi_p)
-        except np.linalg.LinAlgError:
-            # 如果矩阵接近奇异，使用伪逆
-            self.get_logger().warn("Using pseudo-inverse for Kalman gain calculation")
-            K = P_minus @ self.current_phi.T @ np.linalg.pinv(phi_p)
-
-        # 更新步骤
-        innovation = self.current_phi @ a_minus - disturbance  # 预测误差
-
-        # 自适应律，更新参数估计
-        self.current_hat.a = a_minus - delta_tk * K @ innovation + delta_tk *  P_minus @ self.current_phi.T @ s
-
-        # 更新协方差矩阵
-        self.current_hat.P = (np.eye(12) - K @ self.current_phi) @ P_minus @ (
-                    np.eye(12) - K @ self.current_phi).T + delta_tk * K @ R1 @ K.T
+        # σ-修正自适应律
+        # ȧ = -λa + γΦᵀs
+        self.current_hat.a = (1 - lambda_factor * delta_tk) * self.current_hat.a + \
+                             gamma * delta_tk * self.current_phi.T @ s
 
     def log_flight_data(self, pose, velo, rotation_matrix, traj_p, s):
         """记录飞行数据到CSV文件"""
@@ -347,7 +312,7 @@ class TrajController(Node):
 
     def controller_cb(self):
         """控制器主回调函数"""
-        if self.current_pa is None or self.current_velo is None or self.current_imu is None or self.current_phi is None:
+        if self.current_pa is None or self.current_velo is None or self.current_phi is None:
             self.get_logger().warn("Waiting for all required data...")
             return
 
@@ -366,7 +331,7 @@ class TrajController(Node):
         traj_yaw = self.traj.yaw(self.traj_t)
 
         # 获取当前状态
-        pose, velo, rotation_matrix, body_z, accel_world = self.get_current_state()
+        pose, velo, rotation_matrix, body_z = self.get_current_state()
 
         # 计算期望力
         F_sp, s, adaptive_force = self.calculate_desired_force(
@@ -379,7 +344,7 @@ class TrajController(Node):
         self.controller_pub_.publish(attitude_target)
 
         # 更新自适应参数
-        self.update_adaptive_parameters(s, actual_thrust_vector, accel_world)
+        self.update_adaptive_parameters(s)
 
         # 记录飞行数据到CSV
         self.log_flight_data(pose, velo, rotation_matrix, traj_p, s)
@@ -403,14 +368,13 @@ class CurrentHat:
 
     def __init__(self):
         self.a = np.zeros((12, 1))  # 参数估计值
-        self.P = np.eye(12) * 0.1  # 初始协方差矩阵（非零）
 
 
 def main(args=None):
     node = None
     try:
         rclpy.init(args=args)
-        node = TrajController("traj_controller_NF")
+        node = TrajController("traj_controller_NF3")
         rclpy.spin(node)
     except Exception as e:
         print(f"Error in main: {e}")

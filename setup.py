@@ -30,6 +30,7 @@ setup(
             'demo = nl_controller.demo:main',
             'traj_controller_NL2 = nl_controller.traj_controller_NL2:main',
             'traj_controller_NF2 = nl_controller.traj_controller_NF2:main',
+            'traj_controller_NF3 = nl_controller.traj_controller_NF3:main',
             'traj_controller_NFC = nl_controller.traj_controller_NFC:main',
             'traj_controller_NFC2 = nl_controller.traj_controller_NFC2:main',
             'traj_controller_position = nl_controller.traj_controller_position:main',

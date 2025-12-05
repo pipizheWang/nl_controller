@@ -8,6 +8,7 @@ ros2 run mavros mavros_node --ros-args -p fcu_url:=udp://:14540@127.0.0.1:14557 
 
 终端3：
 conda deactivate
+conda activate torch
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 
@@ -22,12 +23,14 @@ ros2 run nl_controller backstepping_controller
 ros2 run nl_controller traj_controller_NL
 ros2 run nl_controller traj_controller_NL2
 ros2 run nl_controller traj_controller_NF
+ros2 run nl_controller traj_controller_NF3
 
 ros2 param set /traj_controller_position traj_mode true
 ros2 param set /backstepping_controller traj_mode true
 ros2 param set /traj_controller_NL traj_mode true
 ros2 param set /traj_controller_NL2 traj_mode true
 ros2 param set /traj_controller_NF traj_mode true
+ros2 param set /traj_controller_NF3 traj_mode true
 
 ros2 service call /mavros/cmd/arming mavros_msgs/srv/CommandBool "{value: true}"
 

@@ -200,7 +200,8 @@ class TrajectoryAnimator:
         
         self.ax.set_xlim(mid_x - max_range, mid_x + max_range)
         self.ax.set_ylim(mid_y - max_range, mid_y + max_range)
-        self.ax.set_zlim(mid_z - max_range, mid_z + max_range)
+        # Z轴固定范围为4-6米
+        self.ax.set_zlim(4, 6)
         
         # 设置视角
         self.ax.view_init(elev=25, azim=45)
