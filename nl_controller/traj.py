@@ -2,10 +2,13 @@ import numpy as np
 
 class TargetTraj():
     def __init__(self, FLAG = 1, h_default = 5.0):
-        self.FLAG = FLAG    #选择轨迹类型，1：xy平面圆轨迹 2:平面8字（里萨如图形）
+        self.FLAG = FLAG    #选择轨迹类型，1：xy平面圆轨迹 2:平面8字（里萨如图形） 4:小圆轨迹(R=2.5m,T=20s)
         self.R = 6.0        #圆轨迹半径
         self.w = (2*np.pi)/30#轨迹周期
         self.h_default = h_default
+        # FLAG=4 的参数：小圆轨迹
+        self.R4 = 2.5       # 半径2.5米
+        self.w4 = (2*np.pi)/20  # 20秒一圈
 
     #若t<0,视为尚未开始跟踪轨迹
     def pose(self, t):#目标位置
@@ -22,6 +25,12 @@ class TargetTraj():
         elif self.FLAG == 3 and t >= 0:
             y =  0.5 * 0.6 * t * t
             return np.array([[0.0], [0.0], [self.h_default]])
+        elif self.FLAG == 4 and t >= 0:
+            # 小圆轨迹：从原点开始，半径2.5m，20秒一圈
+            x = self.R4 * np.sin(self.w4*t)
+            y = self.R4 * (1 - np.cos(self.w4*t))
+            z = self.h_default
+            return np.array([[x], [y], [z]])
         elif t < 0:
             return np.array([[0.0], [0.0], [self.h_default]])
         return None
@@ -40,6 +49,12 @@ class TargetTraj():
         elif self.FLAG == 3 and t >= 0:
             vy = 0.6 * t
             return np.array([[0.0], [0.0], [0.0]])
+        elif self.FLAG == 4 and t >= 0:
+            # 小圆轨迹速度
+            vx = self.R4 * self.w4 * np.cos(self.w4*t)
+            vy = self.R4 * self.w4 * np.sin(self.w4*t)
+            vz = 0.0
+            return np.array([[vx], [vy], [vz]])
         elif t < 0:
             return np.array([[0.0], [0.0], [0.0]])
         return None
@@ -57,6 +72,12 @@ class TargetTraj():
             return np.array([[ax], [ay], [az]])
         elif self.FLAG == 3 and t >= 0:
             return np.array([[0.6], [0.6], [0.0]])
+        elif self.FLAG == 4 and t >= 0:
+            # 小圆轨迹加速度
+            ax = -self.R4 * self.w4 * self.w4 * np.sin(self.w4*t)
+            ay = self.R4 * self.w4 * self.w4 * np.cos(self.w4*t)
+            az = 0.0
+            return np.array([[ax], [ay], [az]])
         elif t < 0:
             return np.array([[0.0], [0.0], [0.0]])
         return None
@@ -69,6 +90,9 @@ class TargetTraj():
             yaw = 0.0
             return yaw
         elif self.FLAG == 3 and t >= 0:
+            yaw = 0.0
+            return yaw
+        elif self.FLAG == 4 and t >= 0:
             yaw = 0.0
             return yaw
         elif t < 0:

@@ -6,6 +6,9 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+from matplotlib.colors import Normalize
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from pathlib import Path
 import csv
 import sys
@@ -60,8 +63,16 @@ class FlightLogPlotter:
         self.data['error_y'] = self.data['y'] - self.data['y_des']
         self.data['error_z'] = self.data['z'] - self.data['z_des']
         
+        # 计算欧式距离跟踪误差
+        self.data['tracking_error'] = np.sqrt(
+            self.data['error_x']**2 + 
+            self.data['error_y']**2 + 
+            self.data['error_z']**2
+        )
+        
         print(f"成功加载 {len(rows)} 条数据记录")
         print(f"飞行时长: {self.data['time'][-1]:.2f} 秒")
+        print(f"跟踪误差统计 - 平均: {np.mean(self.data['tracking_error']):.4f}m, 最大: {np.max(self.data['tracking_error']):.4f}m")
         
     def plot_position_response(self):
         """绘制三轴位置和期望位置的响应曲线（3列1行）"""
@@ -143,19 +154,30 @@ class FlightLogPlotter:
         return fig
     
     def plot_trajectory(self):
-        """绘制无人机轨迹曲线（3D和XY平面，2列1行）"""
+        """绘制无人机轨迹曲线（3D和XY平面，2列1行），用颜色表示跟踪误差"""
         fig = plt.figure(figsize=(14, 6))
+        
+        # 获取跟踪误差用于颜色映射
+        errors = self.data['tracking_error']
+        norm = Normalize(vmin=0, vmax=np.percentile(errors, 95))  # 使用95百分位数避免极端值影响
+        cmap = plt.cm.jet  # 使用jet颜色映射：蓝色表示小误差，红色表示大误差
         
         # 3D轨迹图
         ax1 = fig.add_subplot(121, projection='3d')
         
-        # 绘制实际轨迹
-        ax1.plot(self.data['x'], self.data['y'], self.data['z'], 
-                'b-', linewidth=2, label='Actual', alpha=0.8)
-        
         # 绘制期望轨迹
         ax1.plot(self.data['x_des'], self.data['y_des'], self.data['z_des'], 
-                'r--', linewidth=2, label='Desired', alpha=0.8)
+                'k--', linewidth=1.5, label='Desired', alpha=0.6)
+        
+        # 绘制实际轨迹（用颜色表示误差）
+        points = np.array([self.data['x'], self.data['y'], self.data['z']]).T.reshape(-1, 1, 3)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        
+        # 创建3D LineCollection
+        lc3d = Line3DCollection(segments, cmap=cmap, norm=norm)
+        lc3d.set_array(errors[:-1])
+        lc3d.set_linewidth(2)
+        ax1.add_collection3d(lc3d)
         
         # 标记起点和终点
         ax1.scatter(self.data['x'][0], self.data['y'][0], self.data['z'][0], 
@@ -166,20 +188,24 @@ class FlightLogPlotter:
         ax1.set_xlabel('X (m)', fontsize=11)
         ax1.set_ylabel('Y (m)', fontsize=11)
         ax1.set_zlabel('Z (m)', fontsize=11)
-        ax1.set_title('3D Trajectory', fontsize=12, fontweight='bold')
+        ax1.set_title('3D Trajectory (Color = Tracking Error)', fontsize=12, fontweight='bold')
         ax1.legend(loc='best', fontsize=9)
         ax1.grid(True, alpha=0.3)
         
-        # 设置相等的坐标轴比例
+        # 设置坐标轴范围
+        all_x = np.concatenate([self.data['x'], self.data['x_des']])
+        all_y = np.concatenate([self.data['y'], self.data['y_des']])
+        all_z = np.concatenate([self.data['z'], self.data['z_des']])
+        
         max_range = np.array([
-            self.data['x'].max() - self.data['x'].min(),
-            self.data['y'].max() - self.data['y'].min(),
-            self.data['z'].max() - self.data['z'].min()
+            all_x.max() - all_x.min(),
+            all_y.max() - all_y.min(),
+            all_z.max() - all_z.min()
         ]).max() / 2.0
         
-        mid_x = (self.data['x'].max() + self.data['x'].min()) * 0.5
-        mid_y = (self.data['y'].max() + self.data['y'].min()) * 0.5
-        mid_z = (self.data['z'].max() + self.data['z'].min()) * 0.5
+        mid_x = (all_x.max() + all_x.min()) * 0.5
+        mid_y = (all_y.max() + all_y.min()) * 0.5
+        mid_z = (all_z.max() + all_z.min()) * 0.5
         
         ax1.set_xlim(mid_x - max_range, mid_x + max_range)
         ax1.set_ylim(mid_y - max_range, mid_y + max_range)
@@ -188,13 +214,18 @@ class FlightLogPlotter:
         # XY平面轨迹图
         ax2 = fig.add_subplot(122)
         
-        # 绘制实际轨迹
-        ax2.plot(self.data['x'], self.data['y'], 'b-', linewidth=2, 
-                label='Actual', alpha=0.8)
-        
         # 绘制期望轨迹
-        ax2.plot(self.data['x_des'], self.data['y_des'], 'r--', linewidth=2, 
-                label='Desired', alpha=0.8)
+        ax2.plot(self.data['x_des'], self.data['y_des'], 'k--', linewidth=1.5, 
+                label='Desired', alpha=0.6)
+        
+        # 绘制实际轨迹（用颜色表示误差）
+        points_2d = np.array([self.data['x'], self.data['y']]).T.reshape(-1, 1, 2)
+        segments_2d = np.concatenate([points_2d[:-1], points_2d[1:]], axis=1)
+        
+        lc2d = LineCollection(segments_2d, cmap=cmap, norm=norm)
+        lc2d.set_array(errors[:-1])
+        lc2d.set_linewidth(2)
+        ax2.add_collection(lc2d)
         
         # 标记起点和终点
         ax2.scatter(self.data['x'][0], self.data['y'][0], 
@@ -204,12 +235,23 @@ class FlightLogPlotter:
         
         ax2.set_xlabel('X (m)', fontsize=11)
         ax2.set_ylabel('Y (m)', fontsize=11)
-        ax2.set_title('XY Plane Trajectory', fontsize=12, fontweight='bold')
+        ax2.set_title('XY Plane Trajectory (Color = Tracking Error)', fontsize=12, fontweight='bold')
         ax2.legend(loc='best', fontsize=9)
         ax2.grid(True, alpha=0.3)
         ax2.axis('equal')
+        ax2.autoscale_view()
         
-        plt.tight_layout()
+        # 添加颜色条
+        cbar = fig.colorbar(lc2d, ax=ax2, orientation='vertical', fraction=0.046, pad=0.04)
+        cbar.set_label('Tracking Error (m)', fontsize=10)
+        
+        # 显示误差统计信息
+        mean_error = np.mean(errors)
+        max_error = np.max(errors)
+        fig.text(0.5, 0.02, f'Mean Error: {mean_error:.4f}m | Max Error: {max_error:.4f}m', 
+                ha='center', fontsize=11, style='italic')
+        
+        plt.tight_layout(rect=[0, 0.05, 1, 1])
         return fig
     
     def plot_all(self, save_dir=None):

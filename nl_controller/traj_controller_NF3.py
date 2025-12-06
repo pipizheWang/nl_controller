@@ -23,7 +23,7 @@ class TrajController(Node):
 
         # 控制频率
         self.control_rate = 50.0
-        self.traj = TargetTraj(FLAG=1)
+        self.traj = TargetTraj(FLAG=4)
 
         # 初始化自适应参数估计器
         self.current_hat = CurrentHat()
@@ -346,8 +346,9 @@ class TrajController(Node):
         # 更新自适应参数
         self.update_adaptive_parameters(s)
 
-        # 记录飞行数据到CSV
-        self.log_flight_data(pose, velo, rotation_matrix, traj_p, s)
+        # 只在轨迹跟踪模式下记录飞行数据到CSV
+        if traj_mode:
+            self.log_flight_data(pose, velo, rotation_matrix, traj_p, s)
 
         # 记录调试信息
         if self.get_logger().get_effective_level() <= rclpy.logging.LoggingSeverity.DEBUG:

@@ -25,7 +25,7 @@ class TrajController(Node):
 
         # 控制频率
         self.control_rate = 50.0
-        self.traj = TargetTraj(FLAG=1)
+        self.traj = TargetTraj(FLAG=4)
 
         # 初始化时钟
         self.clock = Clock()
@@ -287,8 +287,9 @@ class TrajController(Node):
         # 发布控制指令
         self.controller_pub_.publish(attitude_target)
 
-        # 记录飞行数据到CSV
-        self.log_flight_data(pose, velo, rotation_matrix, traj_p)
+        # 只在轨迹跟踪模式下记录飞行数据到CSV
+        if traj_mode:
+            self.log_flight_data(pose, velo, rotation_matrix, traj_p)
 
         # 在获取当前状态后立即打印
         pose, velo, rotation_matrix, body_z = self.get_current_state()
