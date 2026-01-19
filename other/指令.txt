@@ -20,6 +20,7 @@ ros2 run nl_controller phi_estimate
 
 ros2 run nl_controller traj_controller_position
 ros2 run nl_controller backstepping_controller
+ros2 run nl_controller backstepping_controller2
 ros2 run nl_controller traj_controller_NL
 ros2 run nl_controller traj_controller_NL2
 ros2 run nl_controller traj_controller_NF
@@ -27,6 +28,7 @@ ros2 run nl_controller traj_controller_NF3
 
 ros2 param set /traj_controller_position traj_mode true
 ros2 param set /backstepping_controller traj_mode true
+ros2 param set /backstepping_controller2 traj_mode true
 ros2 param set /traj_controller_NL traj_mode true
 ros2 param set /traj_controller_NL2 traj_mode true
 ros2 param set /traj_controller_NF traj_mode true

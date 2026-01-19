@@ -98,3 +98,26 @@ class TargetTraj():
         elif t < 0:
             return 0.0
         return None
+
+    def jerk(self, t):#目标加速度的导数（三阶导数）
+        if self.FLAG == 1 and t >= 0:
+            jx = -self.R * self.w * self.w * self.w * np.cos(self.w*t)
+            jy = -self.R * self.w * self.w * self.w * np.sin(self.w*t)
+            jz = 0.0
+            return np.array([[jx], [jy], [jz]])
+        elif self.FLAG == 2 and t >= 0:
+            jx = -self.R * 2*self.w * 2*self.w * 2*self.w * np.cos(2*self.w*t)
+            jy = -2*self.R * self.w * self.w * self.w * np.sin(self.w*t)
+            jz = 0.0
+            return np.array([[jx], [jy], [jz]])
+        elif self.FLAG == 3 and t >= 0:
+            return np.array([[0.0], [0.0], [0.0]])
+        elif self.FLAG == 4 and t >= 0:
+            # 小圆轨迹加速度导数
+            jx = -self.R4 * self.w4 * self.w4 * self.w4 * np.cos(self.w4*t)
+            jy = -self.R4 * self.w4 * self.w4 * self.w4 * np.sin(self.w4*t)
+            jz = 0.0
+            return np.array([[jx], [jy], [jz]])
+        elif t < 0:
+            return np.array([[0.0], [0.0], [0.0]])
+        return None
