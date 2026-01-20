@@ -64,7 +64,7 @@ class BacksteppingController(Node):
             TwistStamped, '/mavros/local_position/velocity_local', self.velo_cb, qos_best_effort)
 
         self.controller_pub_ = self.create_publisher(
-            AttitudeTarget, '/control/attitude', qos_reliable)
+            AttitudeTarget, '/mavros/setpoint_raw/attitude', qos_reliable)
 
         self.controller_timer_ = self.create_timer(1 / self.control_rate, self.controller_cb)
 
@@ -72,11 +72,11 @@ class BacksteppingController(Node):
         self.declare_parameter('traj_mode', False)  # 轨迹模式开关
         self.declare_parameter('k1', 1.0)           # Backstepping参数1
         self.declare_parameter('k2', 1.0)           # Backstepping参数2
-        self.declare_parameter('k3', 4.0)           # Backstepping参数3
+        self.declare_parameter('k3', 0.5)           # Backstepping参数3
         self.declare_parameter('l1', 2.0)
         self.declare_parameter('l2', 2.0)
         self.declare_parameter('M', 0.2)
-        self.declare_parameter('U', 0.4)
+        self.declare_parameter('U', 15 * np.pi / 180)
         self.declare_parameter('gama', 0.0005)       # 自适应学习率
 
         # 读取参数并初始化
@@ -94,8 +94,10 @@ class BacksteppingController(Node):
         self.adaptive_thread.daemon = True
         self.adaptive_thread.start()
 
-        # 初始化日志记录（与 traj_controller_NL 保持一致）
-        self.setup_flight_log()
+        # 日志记录标志（开始轨迹跟踪时才初始化）
+        self.log_file = None
+        self.csv_writer = None
+        self.log_file_path = None
 
     def pa_cb(self, msg):
         self.current_pa = msg
@@ -171,7 +173,7 @@ class BacksteppingController(Node):
 
         self.e_3_x = theta - math.atan(r)
         
-        self.alpha_x = -self.a_x_hat * theta - self.k_3 * self.e_3_x + r_dot / (1 + r**2) - (self.M ** 2 - self.e_3_x**2) / math.cos(self.U) ** 2 * np.sign(self.e_3_x) * abs(p_3)
+        self.alpha_x = -self.a_x_hat * theta - self.k_3 * self.e_3_x + r_dot / (1 + r**2) - (self.M ** 2 - self.e_3_x**2) / math.cos(self.U) ** 2 * np.tanh(self.e_3_x / 0.03) * abs(p_3)
         theta_c = self.rho_x_hat * self.alpha_x
 
         return theta_c
@@ -199,7 +201,7 @@ class BacksteppingController(Node):
 
         self.e_3_y = phi - math.atan(r)
         
-        self.alpha_y = -self.a_y_hat * phi - self.k_3 * self.e_3_y + r_dot / (1 + r**2) - (self.M ** 2 - self.e_3_y**2) / math.cos(self.U) ** 2 * np.sign(self.e_3_y) * abs(p_3)
+        self.alpha_y = -self.a_y_hat * phi - self.k_3 * self.e_3_y + r_dot / (1 + r**2) - (self.M ** 2 - self.e_3_y**2) / math.cos(self.U) ** 2 * np.tanh(self.e_3_y / 0.03) * abs(p_3)
         phi_c = self.rho_y_hat * self.alpha_y
 
         return phi_c
@@ -243,14 +245,16 @@ class BacksteppingController(Node):
             'x', 'y', 'z',
             'vx', 'vy', 'vz',
             'roll', 'pitch', 'yaw',
-            'x_des', 'y_des', 'z_des'
+            'x_des', 'y_des', 'z_des',
+            'a_x_hat', 'a_y_hat', 'rho_x_hat', 'rho_y_hat',
+            'roll_cmd', 'pitch_cmd'
         ]
         self.csv_writer.writerow(header)
         self.log_file.flush()  # 立即写入磁盘
 
-        self.get_logger().info(f"Flight log initialized: {self.log_file_path}")
+        self.get_logger().info(f"Flight log started: {self.log_file_path}")
 
-    def log_flight_data(self, pose, velo, rotation_matrix, traj_p):
+    def log_flight_data(self, pose, velo, rotation_matrix, traj_p, roll_cmd, pitch_cmd):
         """记录飞行数据到CSV文件"""
         # 从旋转矩阵提取欧拉角（roll, pitch, yaw）
         r = R.from_matrix(rotation_matrix)
@@ -266,7 +270,9 @@ class BacksteppingController(Node):
             pose[0, 0], pose[1, 0], pose[2, 0],  # x, y, z
             velo[0, 0], velo[1, 0], velo[2, 0],  # vx, vy, vz
             roll, pitch, yaw,  # roll, pitch, yaw
-            traj_p[0, 0], traj_p[1, 0], traj_p[2, 0]  # x_des, y_des, z_des
+            traj_p[0, 0], traj_p[1, 0], traj_p[2, 0],  # x_des, y_des, z_des
+            self.a_x_hat, self.a_y_hat, self.rho_x_hat, self.rho_y_hat,  # adaptive parameters
+            roll_cmd, pitch_cmd  # attitude commands
         ]
 
         # 写入CSV
@@ -442,12 +448,21 @@ class BacksteppingController(Node):
         # 发布控制指令
         self.controller_pub_.publish(attitude_target)
 
-        # 记录飞行数据到CSV（与 traj_controller_NL 保持一致）
-        try:
-            self.log_flight_data(pose, velo, rotation_matrix, traj_p)
-        except Exception:
-            # 不让日志记录影响控制循环
-            pass
+        # 记录飞行数据到CSV（只在轨迹跟踪模式下）
+        if traj_mode:
+            # 首次开始轨迹跟踪时初始化日志文件
+            if self.log_file is None:
+                try:
+                    self.setup_flight_log()
+                except Exception as e:
+                    self.get_logger().error(f"Failed to setup flight log: {e}")
+            
+            # 记录数据
+            try:
+                self.log_flight_data(pose, velo, rotation_matrix, traj_p, roll_cmd, pitch_cmd)
+            except Exception:
+                # 不让日志记录影响控制循环
+                pass
 
         # 调试信息
         if self.get_logger().get_effective_level() <= rclpy.logging.LoggingSeverity.DEBUG:

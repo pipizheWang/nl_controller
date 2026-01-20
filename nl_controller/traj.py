@@ -14,7 +14,7 @@ class TargetTraj():
     def pose(self, t):#目标位置
         if self.FLAG == 1 and t >= 0:
             x = self.R * np.sin(self.w*t)
-            y = self.R * (1 - np.cos(self.w*t))
+            y = self.R * ( - np.cos(self.w*t))
             z = self.h_default
             return np.array([[x], [y], [z]])
         elif self.FLAG == 2 and t >= 0:

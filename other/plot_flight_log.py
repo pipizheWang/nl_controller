@@ -55,6 +55,24 @@ class FlightLogPlotter:
             'z_des': np.array([float(row['z_des']) for row in rows]),
         }
         
+        # 尝试加载自适应参数（如果存在）
+        self.has_adaptive_params = False
+        if 'a_x_hat' in rows[0] and 'a_y_hat' in rows[0] and 'rho_x_hat' in rows[0] and 'rho_y_hat' in rows[0]:
+            self.data['a_x_hat'] = np.array([float(row['a_x_hat']) for row in rows])
+            self.data['a_y_hat'] = np.array([float(row['a_y_hat']) for row in rows])
+            self.data['rho_x_hat'] = np.array([float(row['rho_x_hat']) for row in rows])
+            self.data['rho_y_hat'] = np.array([float(row['rho_y_hat']) for row in rows])
+            self.has_adaptive_params = True
+            print(f"检测到自适应参数数据")
+        
+        # 尝试加载姿态指令（如果存在）
+        self.has_attitude_commands = False
+        if 'roll_cmd' in rows[0] and 'pitch_cmd' in rows[0]:
+            self.data['roll_cmd'] = np.array([float(row['roll_cmd']) for row in rows])
+            self.data['pitch_cmd'] = np.array([float(row['pitch_cmd']) for row in rows])
+            self.has_attitude_commands = True
+            print(f"检测到姿态指令数据")
+        
         # 将时间戳转换为相对时间（从0开始）
         self.data['time'] = self.data['timestamp'] - self.data['timestamp'][0]
         
@@ -147,6 +165,87 @@ class FlightLogPlotter:
             max_angle = np.max(np.abs(angle_deg))
             ax.text(0.02, 0.98, f'Mean: {mean_angle:.2f}°\nMax: {max_angle:.2f}°',
                    transform=ax.transAxes, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
+                   fontsize=9)
+        
+        plt.tight_layout()
+        return fig
+    
+    def plot_adaptive_parameters(self):
+        """绘制自适应参数曲线（4列1行）"""
+        if not self.has_adaptive_params:
+            print("警告: 日志中没有自适应参数数据")
+            return None
+        
+        fig, axes = plt.subplots(1, 4, figsize=(20, 4))
+        fig.suptitle('Adaptive Parameters', fontsize=14, fontweight='bold')
+        
+        param_labels = ['a_x_hat', 'a_y_hat', 'rho_x_hat', 'rho_y_hat']
+        display_labels = ['$\\hat{a}_x$', '$\\hat{a}_y$', '$\\hat{\\rho}_x$', '$\\hat{\\rho}_y$']
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
+        
+        for i, (ax, param_key, display_label, color) in enumerate(zip(axes, param_labels, display_labels, colors)):
+            ax.plot(self.data['time'], self.data[param_key], color=color, linewidth=2)
+            ax.set_xlabel('Time (s)', fontsize=11)
+            ax.set_ylabel('Value', fontsize=11)
+            ax.set_title(display_label, fontsize=12, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+            
+            # 显示统计信息
+            mean_val = np.mean(self.data[param_key])
+            final_val = self.data[param_key][-1]
+            ax.text(0.02, 0.98, f'Mean: {mean_val:.6f}\nFinal: {final_val:.6f}',
+                   transform=ax.transAxes, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
+                   fontsize=9)
+        
+        plt.tight_layout()
+        return fig
+    
+    def plot_attitude_commands(self):
+        """绘制姿态角和指令对比曲线（2列1行）"""
+        if not self.has_attitude_commands:
+            print("警告: 日志中没有姿态指令数据")
+            return None
+        
+        fig, axes = plt.subplots(1, 2, figsize=(14, 4))
+        fig.suptitle('Attitude vs Command', fontsize=14, fontweight='bold')
+        
+        # Roll对比
+        axes[0].plot(self.data['time'], self.data['roll'], 'b-', linewidth=2, label='Roll (actual)')
+        axes[0].plot(self.data['time'], self.data['roll_cmd'], 'r--', linewidth=2, label='Roll command')
+        axes[0].axhline(y=0, color='k', linestyle='--', linewidth=1, alpha=0.3)
+        axes[0].set_xlabel('Time (s)', fontsize=11)
+        axes[0].set_ylabel('Angle (deg)', fontsize=11)
+        axes[0].set_title('Roll Tracking', fontsize=12, fontweight='bold')
+        axes[0].grid(True, alpha=0.3)
+        axes[0].legend(loc='best', fontsize=9)
+        
+        # 显示Roll跟踪统计信息
+        roll_error = self.data['roll'] - self.data['roll_cmd']
+        mean_roll_error = np.mean(np.abs(roll_error))
+        max_roll_error = np.max(np.abs(roll_error))
+        axes[0].text(0.02, 0.98, f'Mean Error: {mean_roll_error:.2f}°\nMax Error: {max_roll_error:.2f}°',
+                   transform=axes[0].transAxes, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
+                   fontsize=9)
+        
+        # Pitch对比
+        axes[1].plot(self.data['time'], self.data['pitch'], 'b-', linewidth=2, label='Pitch (actual)')
+        axes[1].plot(self.data['time'], self.data['pitch_cmd'], 'r--', linewidth=2, label='Pitch command')
+        axes[1].axhline(y=0, color='k', linestyle='--', linewidth=1, alpha=0.3)
+        axes[1].set_xlabel('Time (s)', fontsize=11)
+        axes[1].set_ylabel('Angle (deg)', fontsize=11)
+        axes[1].set_title('Pitch Tracking', fontsize=12, fontweight='bold')
+        axes[1].grid(True, alpha=0.3)
+        axes[1].legend(loc='best', fontsize=9)
+        
+        # 显示Pitch跟踪统计信息
+        pitch_error = self.data['pitch'] - self.data['pitch_cmd']
+        mean_pitch_error = np.mean(np.abs(pitch_error))
+        max_pitch_error = np.max(np.abs(pitch_error))
+        axes[1].text(0.02, 0.98, f'Mean Error: {mean_pitch_error:.2f}°\nMax Error: {max_pitch_error:.2f}°',
+                   transform=axes[1].transAxes, verticalalignment='top',
                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
                    fontsize=9)
         
@@ -286,6 +385,18 @@ class FlightLogPlotter:
         print("4. Plotting trajectories...")
         fig4 = self.plot_trajectory()
         
+        # 5. 自适应参数曲线（如果存在）
+        fig5 = None
+        if self.has_adaptive_params:
+            print("5. Plotting adaptive parameters...")
+            fig5 = self.plot_adaptive_parameters()
+        
+        # 6. 姿态指令对比（如果存在）
+        fig6 = None
+        if self.has_attitude_commands:
+            print("6. Plotting attitude commands...")
+            fig6 = self.plot_attitude_commands()
+        
         # 保存图片
         if save_dir is not None:
             save_path = Path(save_dir)
@@ -307,6 +418,16 @@ class FlightLogPlotter:
             print(f"  - {fig3_path.name}")
             fig4.savefig(fig4_path, dpi=300, bbox_inches='tight')
             print(f"  - {fig4_path.name}")
+            
+            if fig5 is not None:
+                fig5_path = save_path / f'{log_name}_adaptive_params.png'
+                fig5.savefig(fig5_path, dpi=300, bbox_inches='tight')
+                print(f"  - {fig5_path.name}")
+            
+            if fig6 is not None:
+                fig6_path = save_path / f'{log_name}_attitude_commands.png'
+                fig6.savefig(fig6_path, dpi=300, bbox_inches='tight')
+                print(f"  - {fig6_path.name}")
         
         print("\nAll plots generated successfully!")
 
