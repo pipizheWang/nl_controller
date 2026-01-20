@@ -39,16 +39,16 @@ class BacksteppingController(Node):
         self.t_0 = self.clock.now()
 
         # X通道自适应参数
-        self.a_x_hat = -5.0
+        self.a_x_hat = -5
         self.rho_x_hat = 0.2
-        self.z_3 = 0.0
-        self.alpha_3 = 0.0
+        self.e_3_x = 0.0
+        self.alpha_x = 0.0
 
         # Y通道自适应参数
-        self.a_y_hat = -5.0
+        self.a_y_hat = -5
         self.rho_y_hat = 0.2
-        self.e_3 = 0.0
-        self.tao_3 = 0.0
+        self.e_3_y = 0.0
+        self.alpha_y = 0.0
 
         # 系统常量
         self.gravity = 9.8
@@ -70,15 +70,23 @@ class BacksteppingController(Node):
 
         # 初始化参数
         self.declare_parameter('traj_mode', False)  # 轨迹模式开关
-        self.declare_parameter('k1', 1.5)           # Backstepping参数1
-        self.declare_parameter('k2', 1.5)          # Backstepping参数2
-        self.declare_parameter('k3', 8.0)           # Backstepping参数3
+        self.declare_parameter('k1', 1.0)           # Backstepping参数1
+        self.declare_parameter('k2', 1.0)           # Backstepping参数2
+        self.declare_parameter('k3', 4.0)           # Backstepping参数3
+        self.declare_parameter('l1', 2.0)
+        self.declare_parameter('l2', 2.0)
+        self.declare_parameter('M', 0.2)
+        self.declare_parameter('U', 0.4)
         self.declare_parameter('gama', 0.0005)       # 自适应学习率
 
         # 读取参数并初始化
         self.k_1 = self.get_parameter('k1').value
         self.k_2 = self.get_parameter('k2').value
         self.k_3 = self.get_parameter('k3').value
+        self.l_1 = self.get_parameter('l1').value
+        self.l_2 = self.get_parameter('l2').value
+        self.M = self.get_parameter('M').value
+        self.U = self.get_parameter('U').value
         self.gama = self.get_parameter('gama').value
 
         # 启动自适应参数更新线程
@@ -141,27 +149,30 @@ class BacksteppingController(Node):
         return pose, velo, rotation_matrix, body_z, euler_angles
 
     def x_backstepping(self, x_d, x_d_dot, x_d_ddot, x_d_dddot, x_1, x_2, theta):
-        """X方向的Backstepping控制计算俯仰角命令"""
+        """X方向的BLF控制计算俯仰角命令"""
         g = self.gravity
 
-        z_1 = x_1 - x_d
-        z_1_dot = x_2 - x_d_dot
-        z_1_ddot = g*math.tan(theta) - x_d_ddot
+        e_1 = x_1 - x_d
+        e_2 = x_2 - x_d_dot
 
-        alpha_1 = x_d_dot - self.k_1 * z_1
-        alpha_1_dot = x_d_ddot - self.k_1 * z_1_dot
-        alpha_1_ddot = x_d_dddot - self.k_1 * z_1_ddot
+        e_1_dot = e_2
+        e_2_dot = g * math.tan(theta) - x_d_ddot
 
-        z_2 = x_2 - alpha_1
-        z_2_dot = g * math.tan(theta) - alpha_1_dot
+        p_1 = math.tanh(self.l_1 * e_1 + self.l_2 * e_2)
+        p_1_dot = (1 - p_1**2) * (self.l_1 * e_1_dot + self.l_2 * e_2_dot)
 
-        alpha_2 = 1/g * (alpha_1_dot) - z_1 - self.k_2*z_2
-        alpha_2_dot = 1/g * (alpha_1_ddot) - z_1_dot - self.k_2 * z_2_dot
+        p_2 = math.tanh(self.l_2 * e_2)
+        p_2_dot = (1 - p_2**2) * self.l_2 * e_2_dot
 
-        self.z_3 = math.tan(theta) - alpha_2
+        p_3 = g * (self.k_1 * p_1 * self.l_2 + self.k_2 * p_2 * self.l_2 + self.l_1 * e_2)
 
-        self.alpha_3 = -self.a_x_hat * theta + (math.cos(theta))**2 * (alpha_2_dot - z_2 - self.k_3*self.z_3)
-        theta_c = self.rho_x_hat * self.alpha_3
+        r = (-self.k_1 * p_1 - self.k_2 * p_2 + x_d_ddot) / g
+        r_dot = (-self.k_1 * p_1_dot - self.k_2 * p_2_dot + x_d_dddot) / g
+
+        self.e_3_x = theta - math.atan(r)
+        
+        self.alpha_x = -self.a_x_hat * theta - self.k_3 * self.e_3_x + r_dot / (1 + r**2) - (self.M ** 2 - self.e_3_x**2) / math.cos(self.U) ** 2 * np.sign(self.e_3_x) * abs(p_3)
+        theta_c = self.rho_x_hat * self.alpha_x
 
         return theta_c
     
@@ -170,24 +181,26 @@ class BacksteppingController(Node):
         g = self.gravity
 
         e_1 = y_1 - y_d
-        e_1_dot = y_2 - y_d_dot
-        e_1_ddot = -g*math.tan(phi) - y_d_ddot
+        e_2 = y_2 - y_d_dot
 
+        e_1_dot = e_2
+        e_2_dot = -g * math.tan(phi) - y_d_ddot
 
-        tao_1 = y_d_dot - self.k_1 * e_1
-        tao_1_dot = y_d_ddot - self.k_1 * e_1_dot
-        tao_1_ddot = y_d_dddot - self.k_1 * e_1_ddot
+        p_1 = math.tanh(self.l_1 * e_1 + self.l_2 * e_2)
+        p_1_dot = (1 - p_1**2) * (self.l_1 * e_1_dot + self.l_2 * e_2_dot)
 
-        e_2 = y_2 - tao_1
-        e_2_dot = -g*math.tan(phi) - tao_1_dot
+        p_2 = math.tanh(self.l_2 * e_2)
+        p_2_dot = (1 - p_2**2) * self.l_2 * e_2_dot
 
-        tao_2 = -1/g * (tao_1_dot) + self.k_2 * e_2 + e_1
-        tao_2_dot = -1/g * (tao_1_ddot) + self.k_2 * e_2_dot + e_1_dot
+        p_3 = g * (self.k_1 * p_1 * self.l_2 + self.k_2 * p_2 * self.l_2 + self.l_1 * e_2)
+
+        r = (self.k_1 * p_1 + self.k_2 * p_2 - y_d_ddot) / g
+        r_dot = (self.k_1 * p_1_dot + self.k_2 * p_2_dot - y_d_dddot) / g
+
+        self.e_3_y = phi - math.atan(r)
         
-        self.e_3 = math.tan(phi) - tao_2     
-
-        self.tao_3 = -self.a_y_hat * phi + (math.cos(phi))**2 * (tao_2_dot + e_2 - self.k_3 * self.e_3)
-        phi_c = self.rho_y_hat * self.tao_3
+        self.alpha_y = -self.a_y_hat * phi - self.k_3 * self.e_3_y + r_dot / (1 + r**2) - (self.M ** 2 - self.e_3_y**2) / math.cos(self.U) ** 2 * np.sign(self.e_3_y) * abs(p_3)
+        phi_c = self.rho_y_hat * self.alpha_y
 
         return phi_c
 
@@ -291,16 +304,16 @@ class BacksteppingController(Node):
                 dt = 1.0 / rate
                 
                 # X通道参数更新
-                if abs(math.cos(theta)) > 1e-6:
-                    a_x_hat_dot = self.gama/(math.cos(theta))**2 * theta * self.z_3
-                    rho_x_hat_dot = -self.gama / (math.cos(theta))**2 * self.alpha_3 * self.z_3 
+                if abs(self.M ** 2 - self.e_3_x**2) > 1e-6:
+                    a_x_hat_dot = self.gama/(self.M ** 2 - self.e_3_x**2) * theta * self.e_3_x
+                    rho_x_hat_dot = -self.gama / (self.M ** 2 - self.e_3_x**2) * self.e_3_x * self.alpha_x 
                     self.a_x_hat += a_x_hat_dot * dt
                     self.rho_x_hat += rho_x_hat_dot * dt
 
                 # Y通道参数更新
-                if abs(math.cos(phi)) > 1e-6:
-                    a_y_hat_dot = self.gama/(math.cos(phi))**2 * phi * self.e_3
-                    rho_y_hat_dot = -self.gama / (math.cos(phi))**2 * self.tao_3 * self.e_3
+                if abs(self.M ** 2 - self.e_3_y**2) > 1e-6:
+                    a_y_hat_dot = self.gama/(self.M ** 2 - self.e_3_y**2) * phi * self.e_3_y
+                    rho_y_hat_dot = -self.gama / (self.M ** 2 - self.e_3_y**2) * self.e_3_y * self.alpha_y
                     self.a_y_hat += a_y_hat_dot * dt
                     self.rho_y_hat += rho_y_hat_dot * dt
 
@@ -446,7 +459,7 @@ def main(args=None):
     node = None
     try:
         rclpy.init(args=args)
-        node = BacksteppingController("backstepping_controller2")
+        node = BacksteppingController("blf")
         rclpy.spin(node)
     except Exception as e:
         print(f"Error in main: {e}")
