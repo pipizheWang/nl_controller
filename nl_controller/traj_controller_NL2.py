@@ -25,7 +25,7 @@ class TrajController(Node):
 
         # 控制频率
         self.control_rate = 50.0
-        self.traj = TargetTraj(FLAG=1)
+        self.traj = TargetTraj(FLAG=6)
 
         # 初始化时钟
         self.clock = Clock()

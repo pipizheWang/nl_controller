@@ -25,7 +25,7 @@ class TrajController(Node):
 
         # 控制频率
         self.control_rate = 50.0
-        self.traj = TargetTraj(FLAG=4)
+        self.traj = TargetTraj(FLAG=6)
 
         # 初始化时钟
         self.clock = Clock()
@@ -53,8 +53,8 @@ class TrajController(Node):
         self.controller_timer_ = self.create_timer(1 / self.control_rate, self.controller_cb)
 
         # 初始化参数
-        self.declare_parameter('sliding_gain', [0.3, 0.3, 0.5])  # 滑模跟踪增益
-        self.declare_parameter('tracking_gain', [3.0, 3.0, 5.0])  # 跟踪增益
+        self.declare_parameter('sliding_gain', [1.0, 1.0, 0.8])  # 滑模跟踪增益
+        self.declare_parameter('tracking_gain', [2.3, 2.3, 3.0])  # 跟踪增益
         self.declare_parameter('traj_mode', False)  # 轨迹模式开关
 
         # 系统常量
@@ -215,9 +215,8 @@ class TrajController(Node):
         # 创建控制消息
         attitude_target = AttitudeTarget()
 
-        # 计算归一化推力值（考虑效率）
-        # normalized_thrust = np.sqrt(thrust / self.gravity * self.thrust_efficiency * self.thrust_efficiency)
-        normalized_thrust = -0.0015 * thrust * thrust + 0.0764 * thrust + 0.1237
+        # 计算归一化推力值
+        normalized_thrust = -0.0015 * thrust * thrust + 0.0764 * thrust + 0.1237 - 0.0015
         attitude_target.thrust = np.clip(normalized_thrust, 0.0, 1.0)
 
         # 基于期望力方向计算期望姿态

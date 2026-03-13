@@ -258,7 +258,7 @@ class FlightLogPlotter:
         
         # 获取跟踪误差用于颜色映射
         errors = self.data['tracking_error']
-        norm = Normalize(vmin=0, vmax=np.percentile(errors, 95))  # 使用95百分位数避免极端值影响
+        norm = Normalize(vmin=0, vmax=0.2)  # 固定误差范围0-0.2m，便于对比不同控制方法
         cmap = plt.cm.jet  # 使用jet颜色映射：蓝色表示小误差，红色表示大误差
         
         # 3D轨迹图

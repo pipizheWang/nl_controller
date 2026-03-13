@@ -3,7 +3,8 @@ import rclpy
 import numpy as np
 from numpy.linalg import norm
 from rclpy.node import Node
-from mavros_msgs.msg import PositionTarget
+from mavros_msgs.msg import PositionTarget, RCOut
+from sensor_msgs.msg import BatteryState
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from scipy.spatial.transform import Rotation as R
 from rclpy.qos import QoSProfile, ReliabilityPolicy
@@ -24,27 +25,14 @@ class TrajController(Node):
 
         # 控制频率
         self.control_rate = 50.0
-        self.traj = TargetTraj(FLAG=1)
+        self.traj = TargetTraj(FLAG=7)
 
-        # 使用当前时间创建唯一的文件名
-        current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        log_filename = f"trajectory_log_{current_time}.csv"
-
-        # 确保日志目录存在
-        log_dir = "/home/zhe/Log"
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-
-        # 初始化数据记录
-        self.log_file_path = os.path.join(log_dir, log_filename)
-        self.log_file = open(self.log_file_path, mode='w', newline='')
-        self.csv_writer = csv.writer(self.log_file)
-        self.csv_writer.writerow(["Time", "Pos_x", "Pos_y", "Pos_z",
-                                  "Vel_x", "Vel_y", "Vel_z",
-                                  "Des_x", "Des_y", "Des_z",
-                                  "Position_Error", "Traj_time", "Yaw"])
-
-        self.get_logger().info(f"Logging data to {self.log_file_path}")
+        # 日志相关变量
+        self.log_dir = "/home/zhe/Log"
+        self.log_file = None
+        self.csv_writer = None
+        self.log_file_path = None
+        self.logging_started = False
 
         # 初始化时钟
         self.clock = Clock()
@@ -52,6 +40,8 @@ class TrajController(Node):
         # 初始化状态变量
         self.current_pa = None
         self.current_velo = None
+        self.current_battery = None
+        self.current_pwm = None
 
         # 轨迹计时器
         self.traj_t = -1.0
@@ -65,6 +55,10 @@ class TrajController(Node):
             PoseStamped, '/mavros/local_position/pose', self.pa_cb, qos_best_effort)
         self.velo_sub_ = self.create_subscription(
             TwistStamped, '/mavros/local_position/velocity_local', self.velo_cb, qos_best_effort)
+        self.battery_sub_ = self.create_subscription(
+            BatteryState, '/mavros/battery', self.battery_cb, qos_best_effort)
+        self.pwm_sub_ = self.create_subscription(
+            RCOut, '/mavros/rc/out', self.pwm_cb, qos_best_effort)
 
         self.position_setpoint_pub_ = self.create_publisher(
             PositionTarget, '/mavros/setpoint_raw/local', qos_reliable)
@@ -83,11 +77,45 @@ class TrajController(Node):
     def velo_cb(self, msg):
         self.current_velo = msg
 
+    def battery_cb(self, msg):
+        self.current_battery = msg
+
+    def pwm_cb(self, msg):
+        self.current_pwm = msg
+
+    def initialize_logging(self):
+        """初始化日志文件"""
+        if self.logging_started:
+            return
+        
+        # 使用当前时间创建唯一的文件名
+        current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        log_filename = f"trajectory_log_{current_time}.csv"
+
+        # 确保日志目录存在
+        if not os.path.exists(self.log_dir):
+            os.makedirs(self.log_dir)
+
+        # 初始化数据记录
+        self.log_file_path = os.path.join(self.log_dir, log_filename)
+        self.log_file = open(self.log_file_path, mode='w', newline='')
+        self.csv_writer = csv.writer(self.log_file)
+        self.csv_writer.writerow(["Time", "Pos_x", "Pos_y", "Pos_z",
+                                  "Vel_x", "Vel_y", "Vel_z",
+                                  "Des_x", "Des_y", "Des_z",
+                                  "Position_Error", "Traj_time", "Yaw",
+                                  "Battery_Voltage", "PWM_0", "PWM_1", "PWM_2", "PWM_3"])
+        
+        self.logging_started = True
+        self.get_logger().info(f"Started logging data to {self.log_file_path}")
+
     def update_trajectory_time(self, traj_mode):
 
         if traj_mode and (self.traj_t is None or self.traj_t == -1.0):
             self.t_0 = self.clock.now()
             self.traj_t = 0.0
+            # 开启轨迹跟踪时初始化日志
+            self.initialize_logging()
             self.get_logger().info("Starting trajectory tracking")
         elif traj_mode:
             self.traj_t = (self.clock.now() - self.t_0).nanoseconds * 1e-9
@@ -131,14 +159,29 @@ class TrajController(Node):
             # 计算位置误差
             position_error = norm(current_pose - traj_p)
 
-            # 记录数据（含目标轨迹信息）
-            self.csv_writer.writerow([
-                timestamp,
-                current_pose[0, 0], current_pose[1, 0], current_pose[2, 0],
-                current_velo[0, 0], current_velo[1, 0], current_velo[2, 0],
-                traj_p[0, 0], traj_p[1, 0], traj_p[2, 0],
-                position_error, self.traj_t, traj_yaw
-            ])
+            # 获取电池电压
+            battery_voltage = self.current_battery.voltage if self.current_battery else 0.0
+            
+            # 获取PWM值 (假设有4个电机)
+            pwm_values = [0.0, 0.0, 0.0, 0.0]
+            if self.current_pwm and len(self.current_pwm.channels) >= 4:
+                pwm_values = [
+                    self.current_pwm.channels[0],
+                    self.current_pwm.channels[1],
+                    self.current_pwm.channels[2],
+                    self.current_pwm.channels[3]
+                ]
+
+            # 记录数据（含目标轨迹信息、电池电压和PWM）
+            if self.csv_writer:
+                self.csv_writer.writerow([
+                    timestamp,
+                    current_pose[0, 0], current_pose[1, 0], current_pose[2, 0],
+                    current_velo[0, 0], current_velo[1, 0], current_velo[2, 0],
+                    traj_p[0, 0], traj_p[1, 0], traj_p[2, 0],
+                    position_error, self.traj_t, traj_yaw,
+                    battery_voltage, pwm_values[0], pwm_values[1], pwm_values[2], pwm_values[3]
+                ])
 
             # 新增位置信息打印
             current_x = self.current_pa.pose.position.x
@@ -193,6 +236,10 @@ class TrajController(Node):
 
             # 发布位置指令
             self.position_setpoint_pub_.publish(position_target)
+            
+            # 确保数据实时写入文件
+            if self.log_file:
+                self.log_file.flush()
         else:
             # 不在轨迹模式下，在 (0, 0, 5) 位置保持悬停
             hover_position = PositionTarget()
@@ -222,22 +269,6 @@ class TrajController(Node):
             
             # 发布悬停位置指令
             self.position_setpoint_pub_.publish(hover_position)
-            
-            # 计算与悬停点的位置误差
-            hover_target = np.array([[0.0], [0.0], [5.0]])
-            position_error = norm(current_pose - hover_target)
-            
-            # 记录当前状态
-            self.csv_writer.writerow([
-                timestamp,
-                current_pose[0, 0], current_pose[1, 0], current_pose[2, 0],
-                current_velo[0, 0], current_velo[1, 0], current_velo[2, 0],
-                0.0, 0.0, 5.0,  # 目标位置 (0, 0, 5)
-                position_error, -1.0, 0.0  # 位置误差、轨迹时间和偏航角
-            ])
-
-        # 确保数据实时写入文件
-        self.log_file.flush()
 
     def __del__(self):
         """析构函数，确保文件被正确关闭"""

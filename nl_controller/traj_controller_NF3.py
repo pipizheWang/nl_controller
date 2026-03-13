@@ -23,7 +23,7 @@ class TrajController(Node):
 
         # 控制频率
         self.control_rate = 50.0
-        self.traj = TargetTraj(FLAG=4)
+        self.traj = TargetTraj(FLAG=6)
 
         # 初始化自适应参数估计器
         self.current_hat = CurrentHat()
@@ -275,7 +275,7 @@ class TrajController(Node):
 
         # 自适应参数
         lambda_factor = 0.01  # 遗忘因子
-        gamma = 0.5  # 自适应增益
+        gamma = 1.0  # 自适应增益
 
         # σ-修正自适应律
         # ȧ = -λa + γΦᵀs
