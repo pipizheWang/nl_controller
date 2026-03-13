@@ -6,6 +6,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 from matplotlib.collections import LineCollection
 from matplotlib.colors import Normalize
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
@@ -24,6 +25,59 @@ class FlightLogPlotter:
         """
         self.log_file_path = Path(log_file_path)
         self.data = None
+
+    @staticmethod
+    def _find_first_available_font(candidates):
+        """返回候选字体列表中首个可用字体名，不存在则返回None。"""
+        available = {font.name for font in fm.fontManager.ttflist}
+        for name in candidates:
+            if name in available:
+                return name
+        return None
+
+    def configure_plot_fonts(self):
+        """配置绘图字体：中文优先宋体，英文字母/数字优先Times New Roman。"""
+        latin_candidates = [
+            'Times New Roman',
+            'Times',
+            'Nimbus Roman',
+            'Liberation Serif',
+            'DejaVu Serif',
+        ]
+        songti_candidates = [
+            'SimSun',
+            'Songti SC',
+            'STSong',
+            'AR PL UMing CN',
+            'Source Han Serif SC',
+            'Noto Serif CJK SC',
+        ]
+
+        latin_font = self._find_first_available_font(latin_candidates)
+        chinese_font = self._find_first_available_font(songti_candidates)
+
+        if latin_font is None:
+            latin_font = 'DejaVu Serif'
+            print('警告: 未检测到 Times New Roman，将使用 DejaVu Serif 作为英文字体。')
+
+        if chinese_font is None:
+            raise RuntimeError(
+                '未检测到可用宋体中文字体。请在Linux安装宋体或宋体风格字体后重试，'
+                '例如安装 AR PL UMing CN / Noto Serif CJK SC。'
+            )
+
+        # 按字符回退：英文字母/数字优先使用Times，中文回退到宋体。
+        plt.rcParams['font.family'] = [latin_font, chinese_font]
+        plt.rcParams['font.serif'] = [latin_font, chinese_font]
+        plt.rcParams['axes.unicode_minus'] = False
+
+        # 数学文本中的字母和数字也使用英文字体，避免与主图不一致。
+        plt.rcParams['mathtext.fontset'] = 'custom'
+        plt.rcParams['mathtext.rm'] = latin_font
+        plt.rcParams['mathtext.it'] = latin_font + ':italic'
+        plt.rcParams['mathtext.bf'] = latin_font + ':bold'
+
+        print(f'字体配置完成: 英文/数字={latin_font}, 中文={chinese_font}')
         
     def load_data(self):
         """从CSV文件加载飞行日志数据"""
@@ -95,17 +149,17 @@ class FlightLogPlotter:
     def plot_position_response(self):
         """绘制三轴位置和期望位置的响应曲线（3列1行）"""
         fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-        fig.suptitle('Position Response', fontsize=14, fontweight='bold')
+        fig.suptitle('位置响应曲线', fontsize=14, fontweight='bold')
         
-        axes_labels = ['X Axis', 'Y Axis', 'Z Axis']
+        axes_labels = ['X轴', 'Y轴', 'Z轴']
         pos_keys = ['x', 'y', 'z']
         des_keys = ['x_des', 'y_des', 'z_des']
         
         for i, (ax, label, pos_key, des_key) in enumerate(zip(axes, axes_labels, pos_keys, des_keys)):
-            ax.plot(self.data['time'], self.data[pos_key], 'b-', linewidth=2, label='Actual')
-            ax.plot(self.data['time'], self.data[des_key], 'r--', linewidth=2, label='Desired')
-            ax.set_xlabel('Time (s)', fontsize=11)
-            ax.set_ylabel('Position (m)', fontsize=11)
+            ax.plot(self.data['time'], self.data[pos_key], 'b-', linewidth=2, label='实际值')
+            ax.plot(self.data['time'], self.data[des_key], 'r--', linewidth=2, label='期望值')
+            ax.set_xlabel('时间（秒）', fontsize=11)
+            ax.set_ylabel('位置（米）', fontsize=11)
             ax.set_title(label, fontsize=12, fontweight='bold')
             ax.grid(True, alpha=0.3)
             ax.legend(loc='best', fontsize=9)
@@ -116,27 +170,32 @@ class FlightLogPlotter:
     def plot_tracking_error(self):
         """绘制三轴轨迹跟踪误差曲线（3列1行）"""
         fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-        fig.suptitle('Tracking Error', fontsize=14, fontweight='bold')
+        fig.suptitle('跟踪误差曲线', fontsize=14, fontweight='bold')
         
-        axes_labels = ['X Error', 'Y Error', 'Z Error']
+        axes_labels = ['X轴误差', 'Y轴误差', 'Z轴误差']
         error_keys = ['error_x', 'error_y', 'error_z']
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
         
         for i, (ax, label, error_key, color) in enumerate(zip(axes, axes_labels, error_keys, colors)):
             ax.plot(self.data['time'], self.data[error_key], color=color, linewidth=2)
             ax.axhline(y=0, color='k', linestyle='--', linewidth=1, alpha=0.5)
-            ax.set_xlabel('Time (s)', fontsize=11)
-            ax.set_ylabel('Error (m)', fontsize=11)
+            ax.set_xlabel('时间（秒）', fontsize=11)
+            ax.set_ylabel('误差（米）', fontsize=11)
             ax.set_title(label, fontsize=12, fontweight='bold')
             ax.grid(True, alpha=0.3)
             
             # 显示统计信息
             mean_error = np.mean(np.abs(self.data[error_key]))
             max_error = np.max(np.abs(self.data[error_key]))
-            ax.text(0.02, 0.98, f'Mean: {mean_error:.3f}m\nMax: {max_error:.3f}m',
-                   transform=ax.transAxes, verticalalignment='top',
-                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
-                   fontsize=9)
+            ax.text(
+                0.02,
+                0.98,
+                f'平均值: {mean_error:.3f}米\n最大值: {max_error:.3f}米',
+                transform=ax.transAxes,
+                verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
+                fontsize=9,
+            )
         
         plt.tight_layout()
         return fig
@@ -144,9 +203,9 @@ class FlightLogPlotter:
     def plot_attitude(self):
         """绘制三个姿态角的曲线（3列1行）"""
         fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-        fig.suptitle('Attitude Angles', fontsize=14, fontweight='bold')
+        fig.suptitle('姿态角曲线', fontsize=14, fontweight='bold')
         
-        axes_labels = ['Roll', 'Pitch', 'Yaw']
+        axes_labels = ['横滚角', '俯仰角', '偏航角']
         attitude_keys = ['roll', 'pitch', 'yaw']
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
         
@@ -155,18 +214,23 @@ class FlightLogPlotter:
             angle_deg = self.data[att_key]
             ax.plot(self.data['time'], angle_deg, color=color, linewidth=2)
             ax.axhline(y=0, color='k', linestyle='--', linewidth=1, alpha=0.5)
-            ax.set_xlabel('Time (s)', fontsize=11)
-            ax.set_ylabel('Angle (deg)', fontsize=11)
+            ax.set_xlabel('时间（秒）', fontsize=11)
+            ax.set_ylabel('角度（度）', fontsize=11)
             ax.set_title(label, fontsize=12, fontweight='bold')
             ax.grid(True, alpha=0.3)
             
             # 显示统计信息
             mean_angle = np.mean(np.abs(angle_deg))
             max_angle = np.max(np.abs(angle_deg))
-            ax.text(0.02, 0.98, f'Mean: {mean_angle:.2f}°\nMax: {max_angle:.2f}°',
-                   transform=ax.transAxes, verticalalignment='top',
-                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
-                   fontsize=9)
+            ax.text(
+                0.02,
+                0.98,
+                f'平均值: {mean_angle:.2f}°\n最大值: {max_angle:.2f}°',
+                transform=ax.transAxes,
+                verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
+                fontsize=9,
+            )
         
         plt.tight_layout()
         return fig
@@ -178,26 +242,31 @@ class FlightLogPlotter:
             return None
         
         fig, axes = plt.subplots(1, 4, figsize=(20, 4))
-        fig.suptitle('Adaptive Parameters', fontsize=14, fontweight='bold')
+        fig.suptitle('自适应参数曲线', fontsize=14, fontweight='bold')
         
         param_labels = ['a_x_hat', 'a_y_hat', 'rho_x_hat', 'rho_y_hat']
-        display_labels = ['$\\hat{a}_x$', '$\\hat{a}_y$', '$\\hat{\\rho}_x$', '$\\hat{\\rho}_y$']
+        display_labels = ['a_x估计值', 'a_y估计值', 'rho_x估计值', 'rho_y估计值']
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
         
         for i, (ax, param_key, display_label, color) in enumerate(zip(axes, param_labels, display_labels, colors)):
             ax.plot(self.data['time'], self.data[param_key], color=color, linewidth=2)
-            ax.set_xlabel('Time (s)', fontsize=11)
-            ax.set_ylabel('Value', fontsize=11)
+            ax.set_xlabel('时间（秒）', fontsize=11)
+            ax.set_ylabel('参数值', fontsize=11)
             ax.set_title(display_label, fontsize=12, fontweight='bold')
             ax.grid(True, alpha=0.3)
             
             # 显示统计信息
             mean_val = np.mean(self.data[param_key])
             final_val = self.data[param_key][-1]
-            ax.text(0.02, 0.98, f'Mean: {mean_val:.6f}\nFinal: {final_val:.6f}',
-                   transform=ax.transAxes, verticalalignment='top',
-                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
-                   fontsize=9)
+            ax.text(
+                0.02,
+                0.98,
+                f'平均值: {mean_val:.6f}\n最终值: {final_val:.6f}',
+                transform=ax.transAxes,
+                verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
+                fontsize=9,
+            )
         
         plt.tight_layout()
         return fig
@@ -209,15 +278,15 @@ class FlightLogPlotter:
             return None
         
         fig, axes = plt.subplots(1, 2, figsize=(14, 4))
-        fig.suptitle('Attitude vs Command', fontsize=14, fontweight='bold')
+        fig.suptitle('姿态角与指令对比', fontsize=14, fontweight='bold')
         
         # Roll对比
-        axes[0].plot(self.data['time'], self.data['roll'], 'b-', linewidth=2, label='Roll (actual)')
-        axes[0].plot(self.data['time'], self.data['roll_cmd'], 'r--', linewidth=2, label='Roll command')
+        axes[0].plot(self.data['time'], self.data['roll'], 'b-', linewidth=2, label='横滚角实际值')
+        axes[0].plot(self.data['time'], self.data['roll_cmd'], 'r--', linewidth=2, label='横滚角指令值')
         axes[0].axhline(y=0, color='k', linestyle='--', linewidth=1, alpha=0.3)
-        axes[0].set_xlabel('Time (s)', fontsize=11)
-        axes[0].set_ylabel('Angle (deg)', fontsize=11)
-        axes[0].set_title('Roll Tracking', fontsize=12, fontweight='bold')
+        axes[0].set_xlabel('时间（秒）', fontsize=11)
+        axes[0].set_ylabel('角度（度）', fontsize=11)
+        axes[0].set_title('横滚角跟踪', fontsize=12, fontweight='bold')
         axes[0].grid(True, alpha=0.3)
         axes[0].legend(loc='best', fontsize=9)
         
@@ -225,18 +294,18 @@ class FlightLogPlotter:
         roll_error = self.data['roll'] - self.data['roll_cmd']
         mean_roll_error = np.mean(np.abs(roll_error))
         max_roll_error = np.max(np.abs(roll_error))
-        axes[0].text(0.02, 0.98, f'Mean Error: {mean_roll_error:.2f}°\nMax Error: {max_roll_error:.2f}°',
+        axes[0].text(0.02, 0.98, f'平均误差: {mean_roll_error:.2f}°\n最大误差: {max_roll_error:.2f}°',
                    transform=axes[0].transAxes, verticalalignment='top',
                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
                    fontsize=9)
         
         # Pitch对比
-        axes[1].plot(self.data['time'], self.data['pitch'], 'b-', linewidth=2, label='Pitch (actual)')
-        axes[1].plot(self.data['time'], self.data['pitch_cmd'], 'r--', linewidth=2, label='Pitch command')
+        axes[1].plot(self.data['time'], self.data['pitch'], 'b-', linewidth=2, label='俯仰角实际值')
+        axes[1].plot(self.data['time'], self.data['pitch_cmd'], 'r--', linewidth=2, label='俯仰角指令值')
         axes[1].axhline(y=0, color='k', linestyle='--', linewidth=1, alpha=0.3)
-        axes[1].set_xlabel('Time (s)', fontsize=11)
-        axes[1].set_ylabel('Angle (deg)', fontsize=11)
-        axes[1].set_title('Pitch Tracking', fontsize=12, fontweight='bold')
+        axes[1].set_xlabel('时间（秒）', fontsize=11)
+        axes[1].set_ylabel('角度（度）', fontsize=11)
+        axes[1].set_title('俯仰角跟踪', fontsize=12, fontweight='bold')
         axes[1].grid(True, alpha=0.3)
         axes[1].legend(loc='best', fontsize=9)
         
@@ -244,7 +313,7 @@ class FlightLogPlotter:
         pitch_error = self.data['pitch'] - self.data['pitch_cmd']
         mean_pitch_error = np.mean(np.abs(pitch_error))
         max_pitch_error = np.max(np.abs(pitch_error))
-        axes[1].text(0.02, 0.98, f'Mean Error: {mean_pitch_error:.2f}°\nMax Error: {max_pitch_error:.2f}°',
+        axes[1].text(0.02, 0.98, f'平均误差: {mean_pitch_error:.2f}°\n最大误差: {max_pitch_error:.2f}°',
                    transform=axes[1].transAxes, verticalalignment='top',
                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
                    fontsize=9)
@@ -266,7 +335,7 @@ class FlightLogPlotter:
         
         # 绘制期望轨迹
         ax1.plot(self.data['x_des'], self.data['y_des'], self.data['z_des'], 
-                'k--', linewidth=1.5, label='Desired', alpha=0.6)
+            'k--', linewidth=1.5, label='期望轨迹', alpha=0.6)
         
         # 绘制实际轨迹（用颜色表示误差）
         points = np.array([self.data['x'], self.data['y'], self.data['z']]).T.reshape(-1, 1, 3)
@@ -280,14 +349,14 @@ class FlightLogPlotter:
         
         # 标记起点和终点
         ax1.scatter(self.data['x'][0], self.data['y'][0], self.data['z'][0], 
-                   c='green', s=100, marker='o', label='Start', zorder=5)
+                   c='green', s=100, marker='o', label='起点', zorder=5)
         ax1.scatter(self.data['x'][-1], self.data['y'][-1], self.data['z'][-1], 
-                   c='red', s=100, marker='s', label='End', zorder=5)
+                   c='red', s=100, marker='s', label='终点', zorder=5)
         
-        ax1.set_xlabel('X (m)', fontsize=11)
-        ax1.set_ylabel('Y (m)', fontsize=11)
-        ax1.set_zlabel('Z (m)', fontsize=11)
-        ax1.set_title('3D Trajectory (Color = Tracking Error)', fontsize=12, fontweight='bold')
+        ax1.set_xlabel('X轴（米）', fontsize=11)
+        ax1.set_ylabel('Y轴（米）', fontsize=11)
+        ax1.set_zlabel('Z轴（米）', fontsize=11)
+        ax1.set_title('三维轨迹（颜色表示跟踪误差）', fontsize=12, fontweight='bold')
         ax1.legend(loc='best', fontsize=9)
         ax1.grid(True, alpha=0.3)
         
@@ -315,7 +384,7 @@ class FlightLogPlotter:
         
         # 绘制期望轨迹
         ax2.plot(self.data['x_des'], self.data['y_des'], 'k--', linewidth=1.5, 
-                label='Desired', alpha=0.6)
+            label='期望轨迹', alpha=0.6)
         
         # 绘制实际轨迹（用颜色表示误差）
         points_2d = np.array([self.data['x'], self.data['y']]).T.reshape(-1, 1, 2)
@@ -328,13 +397,13 @@ class FlightLogPlotter:
         
         # 标记起点和终点
         ax2.scatter(self.data['x'][0], self.data['y'][0], 
-                   c='green', s=100, marker='o', label='Start', zorder=5)
+                   c='green', s=100, marker='o', label='起点', zorder=5)
         ax2.scatter(self.data['x'][-1], self.data['y'][-1], 
-                   c='red', s=100, marker='s', label='End', zorder=5)
+                   c='red', s=100, marker='s', label='终点', zorder=5)
         
-        ax2.set_xlabel('X (m)', fontsize=11)
-        ax2.set_ylabel('Y (m)', fontsize=11)
-        ax2.set_title('XY Plane Trajectory (Color = Tracking Error)', fontsize=12, fontweight='bold')
+        ax2.set_xlabel('X轴（米）', fontsize=11)
+        ax2.set_ylabel('Y轴（米）', fontsize=11)
+        ax2.set_title('XY平面轨迹（颜色表示跟踪误差）', fontsize=12, fontweight='bold')
         ax2.legend(loc='best', fontsize=9)
         ax2.grid(True, alpha=0.3)
         ax2.axis('equal')
@@ -342,12 +411,12 @@ class FlightLogPlotter:
         
         # 添加颜色条
         cbar = fig.colorbar(lc2d, ax=ax2, orientation='vertical', fraction=0.046, pad=0.04)
-        cbar.set_label('Tracking Error (m)', fontsize=10)
+        cbar.set_label('跟踪误差（米）', fontsize=10)
         
         # 显示误差统计信息
         mean_error = np.mean(errors)
         max_error = np.max(errors)
-        fig.text(0.5, 0.02, f'Mean Error: {mean_error:.4f}m | Max Error: {max_error:.4f}m', 
+        fig.text(0.5, 0.02, f'平均误差: {mean_error:.4f}米 | 最大误差: {max_error:.4f}米', 
                 ha='center', fontsize=11, style='italic')
         
         plt.tight_layout(rect=[0, 0.05, 1, 1])
@@ -363,9 +432,8 @@ class FlightLogPlotter:
         if self.data is None:
             self.load_data()
         
-        # 使用英文标签，避免中文字体问题
-        plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
-        plt.rcParams['axes.unicode_minus'] = False
+        # 配置字体，保证Linux环境下中文与英文字体正确显示
+        self.configure_plot_fonts()
         
         print("\nGenerating plots...")
         
